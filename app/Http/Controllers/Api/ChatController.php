@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\ChatService;
+use App\Services\LlmService;
+use App\Services\RexOrchestratorService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -98,22 +100,96 @@ class ChatController extends Controller
 
         $this->chatService->logUserMessage($companyId, $sessionId, $content);
 
+        $llmService = app(LlmService::class);
+        $orchestrator = app(RexOrchestratorService::class);
+
         // Set up SSE response
-        return new StreamedResponse(function () use ($companyId, $userId, $sessionId, $content) {
-            echo "data: " . json_encode(['type' => 'status', 'payload' => 'Processing...']) . "\n\n";
-            ob_flush();
-            flush();
+        return new StreamedResponse(function () use ($companyId, $userId, $sessionId, $content, $llmService, $orchestrator) {
+            // Turn off output buffering for PHP/Nginx
+            if (function_exists('apache_setenv')) {
+                apache_setenv('no-gzip', '1');
+            }
+            ini_set('output_buffering', 'off');
+            ini_set('zlib.output_compression', 'off');
 
-            // In a real implementation, this would call the Python Orchestrator API via HTTP stream.
-            // For now, we will simulate the Rex response directly.
-            sleep(1);
-            $fakeResponse = "I have reviewed the information. How else can I assist you?";
-            echo "data: " . json_encode(['type' => 'message_delta', 'payload' => $fakeResponse]) . "\n\n";
-            ob_flush();
-            flush();
+            $accumulatedContent = '';
 
-            $this->chatService->logAssistantMessage($companyId, $sessionId, $fakeResponse, null);
+            try {
+                echo "data: " . json_encode(['type' => 'run.started', 'payload' => ['sessionId' => $sessionId]]) . "\n\n";
+                ob_flush();
+                flush();
 
+                $orchestrated = $orchestrator->handle($companyId, $content);
+                if ($orchestrated) {
+                    echo "data: " . json_encode(['type' => 'route.selected', 'payload' => ['route' => $orchestrated['route']]]) . "\n\n";
+                    ob_flush();
+                    flush();
+
+                    echo "data: " . json_encode(['type' => 'tool.started', 'payload' => ['toolName' => $orchestrated['toolName']]]) . "\n\n";
+                    ob_flush();
+                    flush();
+
+                    foreach ($orchestrated['artifacts'] as $artifact) {
+                        echo "data: " . json_encode(['type' => 'artifact.upsert', 'payload' => $artifact]) . "\n\n";
+                        ob_flush();
+                        flush();
+                    }
+
+                    echo "data: " . json_encode(['type' => 'tool.completed', 'payload' => ['toolName' => $orchestrated['toolName'], 'success' => true, 'rowCount' => count($orchestrated['artifacts'])]]) . "\n\n";
+                    ob_flush();
+                    flush();
+
+                    $accumulatedContent = $orchestrated['message'];
+                    echo "data: " . json_encode(['type' => 'message.delta', 'payload' => ['content' => $accumulatedContent]]) . "\n\n";
+                    ob_flush();
+                    flush();
+
+                    $structuredPayload = [
+                        'routedTo' => $orchestrated['route'],
+                        'artifacts' => $orchestrated['artifacts'],
+                    ];
+                    $this->chatService->logAssistantMessage($companyId, $sessionId, $accumulatedContent, $structuredPayload);
+
+                    echo "data: " . json_encode(['type' => 'message.completed', 'payload' => ['routedTo' => $orchestrated['route'], 'artifactCount' => count($orchestrated['artifacts']), 'actionCount' => 0]]) . "\n\n";
+                    ob_flush();
+                    flush();
+                    return;
+                }
+
+                echo "data: " . json_encode(['type' => 'route.selected', 'payload' => ['route' => 'direct']]) . "\n\n";
+                ob_flush();
+                flush();
+
+                // Fetch full session history so LLM has context
+                $session = $this->chatService->getSession($companyId, $sessionId);
+                $messages = array_map(function($msg) {
+                    return [
+                        'role' => $msg['role'],
+                        'content' => $msg['content']
+                    ];
+                }, $session['messages'] ?? []);
+
+                $systemPrompt = "You are Rex, an expert AI financial auditor built into Brevix AI. You are confident, direct, and concise — like a senior partner at a forensic accounting firm. Answer the question clearly and succinctly. If the user is asking about something that requires their company data, explain that you'll need to look it up and suggest they rephrase as a specific investigation question. Keep responses under 200 words unless a detailed explanation is needed.";
+
+                $llmService->streamChat($messages, $systemPrompt, function($chunk) use (&$accumulatedContent) {
+                    $accumulatedContent .= $chunk;
+                    echo "data: " . json_encode(['type' => 'message.delta', 'payload' => ['content' => $chunk]]) . "\n\n";
+                    ob_flush();
+                    flush();
+                });
+
+                // Finalize and persist assistant response
+                $this->chatService->logAssistantMessage($companyId, $sessionId, $accumulatedContent, null);
+
+                echo "data: " . json_encode(['type' => 'message.completed', 'payload' => ['routedTo' => 'direct', 'artifactCount' => 0, 'actionCount' => 0]]) . "\n\n";
+                ob_flush();
+                flush();
+
+            } catch (\Exception $e) {
+                echo "data: " . json_encode(['type' => 'error', 'payload' => ['message' => $e->getMessage()]]) . "\n\n";
+                ob_flush();
+                flush();
+            }
         }, 200, [
             'Content-Type' => 'text/event-stream',
             'Cache-Control' => 'no-cache',

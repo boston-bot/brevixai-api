@@ -41,13 +41,9 @@ class TransactionService
                     COALESCE(t.anomaly_flag, FALSE) AS anomaly_flag,
                     t.anomaly_reason,
                     CASE WHEN COALESCE(t.anomaly_flag, FALSE) THEN 'flagged' ELSE 'completed' END AS status,
-                    CASE
-                        WHEN u.id IS NULL THEN 'file_upload'
-                        ELSE 'file_upload'
-                    END AS source_type,
-                    COALESCE(u.original_filename, u.filename, 'CSV Upload') AS source_name
+                    t.source_type,
+                    t.source_name
                 FROM all_transactions t
-                LEFT JOIN uploads u ON u.id = t.upload_id
                 WHERE {$where}
             )
             SELECT
@@ -131,11 +127,11 @@ class TransactionService
         // The CTE uses companyId once, then the lateral joins use it 4 more times
         $queryParams = [$companyId, ...$params, $companyId, $companyId, $companyId, $companyId, $limit, $offset];
 
-        $countSql = "SELECT COUNT(*)::int AS total FROM all_transactions t LEFT JOIN uploads u ON u.id = t.upload_id WHERE {$where}";
+        $countSql = "SELECT COUNT(*)::int AS total FROM all_transactions t WHERE {$where}";
 
         [$rows, $countRow] = [
             DB::select($sql, $queryParams),
-            DB::selectOne($countSql, [$companyId, ...$params]),
+            DB::selectOne($countSql, $params),
         ];
 
         return [
@@ -159,8 +155,8 @@ class TransactionService
                 COALESCE(t.anomaly_flag, FALSE) AS anomaly_flag,
                 t.anomaly_reason,
                 CASE WHEN COALESCE(t.anomaly_flag, FALSE) THEN 'flagged' ELSE 'completed' END AS status,
-                t.raw_row, t.upload_id,
-                u.original_filename AS source_filename, u.status AS upload_status, u.created_at AS upload_created_at, t.txn_id
+                t.raw_row, t.upload_id, t.txn_id, t.source_type, t.source_name,
+                u.status AS upload_status, u.created_at AS upload_created_at
              FROM all_transactions t
              LEFT JOIN uploads u ON u.id = t.upload_id
              WHERE t.company_id = ? AND t.id = ?",
@@ -199,8 +195,8 @@ class TransactionService
             'anomaly_flag' => (bool)$base['anomaly_flag'],
             'anomaly_reason' => $base['anomaly_reason'],
             'status' => $base['status'],
-            'source_type' => 'file_upload',
-            'source_name' => $base['source_filename'] ?? 'CSV Upload',
+            'source_type' => $base['source_type'],
+            'source_name' => $base['source_name'],
             'linked_alert_count' => count($linkedAlerts),
             'linked_case_id' => $linkedCase['id'] ?? null,
             'linked_case_status' => $linkedCase['status'] ?? null,
@@ -236,7 +232,7 @@ class TransactionService
     public function setReviewState(string $companyId, string $userId, string $transactionId, bool $marked): ?array
     {
         $exists = DB::selectOne(
-            "SELECT id FROM transactions WHERE company_id = ? AND id = ? LIMIT 1",
+            "SELECT id FROM all_transactions WHERE company_id = ? AND id = ? LIMIT 1",
             [$companyId, $transactionId]
         );
 
@@ -302,6 +298,10 @@ class TransactionService
         if (!empty($filters['type'])) {
             $conditions[] = "LOWER(COALESCE(t.type, '')) = ?";
             $params[] = strtolower($filters['type']);
+        }
+        if (!empty($filters['source_type']) && $filters['source_type'] !== 'all') {
+            $conditions[] = "LOWER(COALESCE(t.source_type, '')) = ?";
+            $params[] = strtolower($filters['source_type']);
         }
         if (!empty($filters['uncategorized'])) {
             $conditions[] = "(t.category IS NULL OR BTRIM(t.category) = '')";

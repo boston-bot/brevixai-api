@@ -139,15 +139,27 @@ class ChatService
 
     public function getWorkspace(string $companyId, string $sessionId): array
     {
-        // Stub for artifacts which used to read from the tracer / S3 / DB
-        $artifacts = []; 
+        $messages = ChatMessage::where('session_id', $sessionId)
+            ->where('company_id', $companyId)
+            ->where('role', 'assistant')
+            ->orderBy('created_at')
+            ->get();
+
+        $artifacts = [];
+        foreach ($messages as $message) {
+            $payload = $message->structured_payload ?? [];
+            foreach (($payload['artifacts'] ?? []) as $artifact) {
+                $artifacts[$artifact['id'] ?? uniqid('artifact-')] = $artifact;
+            }
+        }
+
         $actions = RexPendingAction::where('session_id', $sessionId)
             ->where('company_id', $companyId)
             ->where('status', 'pending')
             ->get();
 
         return [
-            'artifacts' => $artifacts,
+            'artifacts' => array_values($artifacts),
             'actions' => $actions,
         ];
     }

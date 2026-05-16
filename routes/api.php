@@ -1,12 +1,18 @@
 <?php
 
 use App\Http\Controllers\Api\AlertController;
+use App\Http\Controllers\Api\AccountingController;
 use App\Http\Controllers\Api\AnalyticsController;
+use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CaseController;
 use App\Http\Controllers\Api\ChatController;
+use App\Http\Controllers\Api\ControlsController;
+use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\GnuCashController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\ReconciliationController;
+use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\UploadController;
 use Illuminate\Support\Facades\Route;
@@ -37,10 +43,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/qbo/purge/{realmId}', [IntegrationController::class, 'qboPurge']);
         Route::post('/qbo/credentials', [IntegrationController::class, 'qboSaveCredentials']);
         Route::delete('/qbo/credentials', [IntegrationController::class, 'qboRemoveCredentials']);
+
+        // GnuCash Integration
+        Route::prefix('gnucash')->group(function () {
+            Route::get('status', [GnuCashController::class, 'status']);
+            Route::post('upload', [GnuCashController::class, 'upload']);
+            Route::delete('purge', [GnuCashController::class, 'purge']);
+        });
     });
 
     // Chat
     Route::prefix('chat')->group(function () {
+        Route::get('/stream', [ChatController::class, 'stream']);
         Route::get('/usage', [ChatController::class, 'usage']);
         Route::get('/sessions', [ChatController::class, 'index']);
         Route::post('/sessions', [ChatController::class, 'store']);
@@ -57,6 +71,43 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/summary', [AnalyticsController::class, 'summary']);
         Route::get('/vendors', [AnalyticsController::class, 'vendors']);
         Route::get('/cash-flow', [AnalyticsController::class, 'cashFlow']);
+    });
+
+    // Accounting
+    Route::prefix('accounting')->group(function () {
+        Route::get('/tax-estimate', [AccountingController::class, 'taxEstimate']);
+    });
+
+    // Dashboard
+    Route::prefix('dashboard')->group(function () {
+        Route::get('/summary', [DashboardController::class, 'summary']);
+    });
+
+    // AR Aging
+    Route::prefix('ar-aging')->group(function () {
+        Route::get('/summary', [ArAgingController::class, 'summary']);
+        Route::get('/customers', [ArAgingController::class, 'customers']);
+        Route::get('/invoices', [ArAgingController::class, 'invoices']);
+        Route::get('/write-off-candidates', [ArAgingController::class, 'writeOffCandidates']);
+        Route::patch('/invoices/{id}', [ArAgingController::class, 'updateInvoice']);
+        Route::post('/invoices/{id}/write-off', [ArAgingController::class, 'writeOff']);
+    });
+
+    // Controls
+    Route::prefix('controls')->group(function () {
+        Route::get('/', [ControlsController::class, 'index']);
+        Route::get('/health', [ControlsController::class, 'health']);
+        Route::get('/violations', [ControlsController::class, 'violations']);
+        Route::post('/evaluate', [ControlsController::class, 'evaluate']);
+        Route::patch('/violations/{id}', [ControlsController::class, 'updateViolation']);
+        Route::patch('/{id}', [ControlsController::class, 'update']);
+    });
+
+    // Subscriptions
+    Route::prefix('subscriptions')->group(function () {
+        Route::get('/', [SubscriptionController::class, 'show']);
+        Route::post('/checkout', [SubscriptionController::class, 'checkout']);
+        Route::post('/cancel', [SubscriptionController::class, 'cancel']);
     });
 
     // Uploads

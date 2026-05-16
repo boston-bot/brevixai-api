@@ -54,8 +54,7 @@ class IntegrationController extends Controller
         }
 
         try {
-            $redirectUri = config('app.url') . '/api/integrations/qbo/callback';
-            $this->qboService->exchangeTokens($companyId, $realmId, $code, $redirectUri);
+            $this->qboService->exchangeTokens($companyId, $realmId, $code, $this->qboService->redirectUri());
             
             // Redirect back to frontend
             return redirect(config('app.frontend_url', config('app.url')) . '/settings');
@@ -92,36 +91,11 @@ class IntegrationController extends Controller
         if (!$companyId || !$realmId) return response()->json(['error' => 'Invalid request'], 400);
 
         try {
-            $integration = DB::table('integrations')
-                ->where('company_id', $companyId)
-                ->where('provider', 'quickbooks')
-                ->where('realm_id', $realmId)
-                ->first();
+            $sync = $this->qboService->sync($companyId, $realmId);
 
-            if ($integration && $integration->sync_status === 'syncing') {
-                return response()->json(['error' => 'A synchronization is already in progress.'], 409);
-            }
-
-            if (!$integration || !$integration->access_token_enc) {
-                return response()->json(['error' => 'Cannot sync a disconnected company.'], 400);
-            }
-
-            DB::table('integrations')
-                ->where('company_id', $companyId)
-                ->where('realm_id', $realmId)
-                ->update([
-                    'sync_status' => 'syncing',
-                    'sync_progress' => 0,
-                    'sync_error' => null,
-                    'updated_at' => now(),
-                ]);
-
-            // Dispatch background job
-            // QboSyncJob::dispatch($companyId, $realmId);
-
-            return response()->json(['message' => 'QuickBooks sync started']);
+            return response()->json($sync);
         } catch (Exception $e) {
-            return response()->json(['error' => 'Failed to start sync'], 500);
+            return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
         }
     }
 

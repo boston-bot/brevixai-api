@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChatMessage extends Model
 {
+    use HasUuids;
+
     protected $keyType = 'string';
     public $incrementing = false;
     public $timestamps = false; // Only created_at exists in DB

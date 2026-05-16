@@ -132,6 +132,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->user()->load('company');
+        $company = $user->company;
 
         return response()->json([
             'id' => $user->id,
@@ -139,10 +140,10 @@ class AuthController extends Controller
             'firstName' => $user->first_name,
             'lastName' => $user->last_name,
             'companyId' => $user->company_id,
-            'companyName' => $user->company ? $user->company->name : null,
+            'companyName' => $company ? $company->name : null,
             'role' => $user->role,
             'createdAt' => $user->created_at,
-            'hasCompletedOnboarding' => (bool) $user->has_completed_onboarding,
+            'hasCompletedOnboarding' => (bool) ($company?->has_completed_onboarding ?? false),
         ]);
     }
 
@@ -151,9 +152,14 @@ class AuthController extends Controller
      */
     public function completeOnboarding(Request $request): JsonResponse
     {
-        $user = $request->user();
-        $user->has_completed_onboarding = true;
-        $user->save();
+        $company = $request->user()->company;
+
+        if (!$company) {
+            return response()->json(['error' => 'User is not associated with a company'], 422);
+        }
+
+        $company->has_completed_onboarding = true;
+        $company->save();
 
         return response()->json(['success' => true]);
     }

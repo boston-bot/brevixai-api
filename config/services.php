@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'quickbooks' => [
+        'redirect_uri' => env('QB_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost'), '/') . '/api/integrations/qbo/callback'),
+        'sandbox_base_url' => env('QB_SANDBOX_BASE_URL', 'https://sandbox-quickbooks.api.intuit.com'),
+        'production_base_url' => env('QB_PRODUCTION_BASE_URL', 'https://quickbooks.api.intuit.com'),
+        'minor_version' => env('QB_MINOR_VERSION', '75'),
+    ],
+
 ];
