@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Upload;
 use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
+use App\Services\Agents\VendorRiskScoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -69,6 +70,36 @@ class AgentToolController extends Controller
             return response()->json($riskAnalysisService->riskSummary($companyId, $period));
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'risk_summary', $e);
+        }
+    }
+
+    public function vendorRisk(Request $request, string $companyId, VendorRiskScoringService $vendorRiskService): JsonResponse
+    {
+        if (!Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (!$user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        $vendorName = $request->query('vendor');
+
+        try {
+            if (!Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            if ($vendorName !== null && $vendorName !== '') {
+                $result = $vendorRiskService->scoreVendor($companyId, $vendorName);
+                return response()->json($result);
+            }
+
+            $result = $vendorRiskService->scoreAllVendors($companyId);
+            return response()->json(['vendors' => $result]);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'vendor_risk', $e);
         }
     }
 
