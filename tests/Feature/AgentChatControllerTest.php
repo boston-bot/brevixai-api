@@ -108,6 +108,50 @@ class AgentChatControllerTest extends TestCase
         });
     }
 
+    public function test_agent_chat_rejects_unauthenticated_request(): void
+    {
+        [$company] = $this->createCompanyUser('Company A');
+        Http::fake();
+
+        $this->postJson('/api/chat/agent/messages', [
+            'company_id' => $company->id,
+            'message' => 'Check fraud risk.',
+        ])->assertUnauthorized();
+
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('agent_runs', 0);
+    }
+
+    public function test_agent_chat_rejects_invalid_payload_before_calling_langgraph(): void
+    {
+        [, $user] = $this->createCompanyUser('Company A');
+        Sanctum::actingAs($user);
+        Http::fake();
+
+        $this->postJson('/api/chat/agent/messages', [
+            'company_id' => 'not-a-uuid',
+            'message' => '',
+            'requested_action' => 'create_alert',
+            'date_range' => [
+                'start_date' => '2026-05-31',
+                'end_date' => '2026-05-01',
+            ],
+            'max_response_size' => 50000,
+            'page_context' => ['selected_period' => '2026-99'],
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors([
+                'company_id',
+                'message',
+                'requested_action',
+                'date_range.start_date',
+                'max_response_size',
+                'page_context.selected_period',
+            ]);
+
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('agent_runs', 0);
+    }
+
     public function test_agent_chat_rejects_cross_company_request_before_calling_langgraph(): void
     {
         [, $user] = $this->createCompanyUser('Company A');
@@ -146,7 +190,7 @@ class AgentChatControllerTest extends TestCase
                     [
                         'type' => 'create_alert',
                         'label' => 'Create alert',
-                        'requires_approval' => true,
+                        'requires_approval' => false,
                         'payload' => ['title' => 'Draft alert'],
                     ],
                 ],
@@ -172,6 +216,19 @@ class AgentChatControllerTest extends TestCase
             ->assertJsonPath('intent', 'fraud_pattern_search')
             ->assertJsonPath('recommended_actions.0.requires_approval', true);
 
+        $this->assertSame([
+            'message',
+            'intent',
+            'findings',
+            'recommended_actions',
+            'can_create_alert',
+            'requires_review',
+            'trace_id',
+        ], array_keys($response->json()));
+        $this->assertTrue($response->json('can_create_alert'));
+        $this->assertTrue($response->json('requires_review'));
+        $this->assertNotEmpty($response->json('trace_id'));
+
         Http::assertSent(fn ($request): bool => $request->url() === 'http://agent.test/agent/run'
             && $request->hasHeader('Authorization', 'Bearer test-agent-key')
             && $request['company_id'] === $company->id
@@ -189,6 +246,47 @@ class AgentChatControllerTest extends TestCase
             'user_id' => $user->id,
             'action_type' => 'create_alert',
             'status' => 'pending',
+        ]);
+    }
+
+    public function test_agent_chat_returns_safe_contract_when_agent_service_is_unavailable(): void
+    {
+        [$company, $user] = $this->createCompanyUser('Company A');
+        Sanctum::actingAs($user);
+
+        Http::fake([
+            'http://agent.test/agent/run' => Http::response(['error' => 'upstream down'], 503),
+        ]);
+
+        $response = $this->postJson('/api/chat/agent/messages', [
+            'company_id' => $company->id,
+            'message' => 'Are there any suspicious vendors this month?',
+        ]);
+
+        $response->assertStatus(502)
+            ->assertJsonPath('message', 'I could not complete the risk review right now. No alerts or cases were created. Please try again or review the dashboard manually.')
+            ->assertJsonPath('intent', 'agent_service_unavailable')
+            ->assertJsonPath('findings', [])
+            ->assertJsonPath('recommended_actions', [])
+            ->assertJsonPath('can_create_alert', false)
+            ->assertJsonPath('requires_review', false);
+
+        $this->assertSame([
+            'message',
+            'intent',
+            'findings',
+            'recommended_actions',
+            'can_create_alert',
+            'requires_review',
+            'trace_id',
+        ], array_keys($response->json()));
+        $this->assertArrayNotHasKey('exception', $response->json());
+        $this->assertArrayNotHasKey('trace', $response->json());
+
+        $this->assertDatabaseHas('agent_runs', [
+            'company_id' => $company->id,
+            'user_id' => $user->id,
+            'status' => 'failed',
         ]);
     }
 

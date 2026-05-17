@@ -83,7 +83,7 @@ class Phase1AgentFraudScenarioTest extends TestCase
                     [
                         'type' => 'create_alert',
                         'label' => 'Create alert',
-                        'requires_approval' => true,
+                        'requires_approval' => false,
                         'payload' => ['title' => 'Draft review alert'],
                     ],
                 ],
@@ -123,7 +123,9 @@ class Phase1AgentFraudScenarioTest extends TestCase
             ->assertJsonPath('intent', 'fraud_pattern_search')
             ->assertJsonCount(6, 'findings')
             ->assertJsonPath('recommended_actions.0.type', 'create_alert')
-            ->assertJsonPath('recommended_actions.0.requires_approval', true);
+            ->assertJsonPath('recommended_actions.0.requires_approval', true)
+            ->assertJsonPath('can_create_alert', true)
+            ->assertJsonPath('requires_review', true);
 
         $this->assertNotEmpty($response->json('findings.0.evidence'));
         $this->assertNotEmpty($response->json('findings.0.severity'));

@@ -4,10 +4,12 @@ namespace Tests\Feature;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Agents\AgentRiskAnalysisService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\TestCase;
 
 class AgentToolAuthorizationTest extends TestCase
@@ -70,6 +72,38 @@ class AgentToolAuthorizationTest extends TestCase
             ->getJson("/api/internal/agent-tools/companies/{$company->id}/context")
             ->assertForbidden()
             ->assertJson(['error' => 'User is not authorized for this company']);
+    }
+
+    public function test_agent_tool_endpoint_rejects_invalid_period(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+
+        $this->withToken('test-agent-key')
+            ->withHeader('X-Brevix-User-Id', $user->id)
+            ->getJson("/api/internal/agent-tools/companies/{$company->id}/risk-summary?period=2026-99")
+            ->assertUnprocessable()
+            ->assertJson(['error' => 'Invalid period. Use YYYY-MM.']);
+    }
+
+    public function test_agent_tool_endpoint_returns_safe_error_when_tool_fails(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+
+        $this->app->instance(AgentRiskAnalysisService::class, new class extends AgentRiskAnalysisService {
+            public function riskSummary(string $companyId, ?string $period = null): array
+            {
+                throw new RuntimeException('Sensitive transaction details should not be exposed.');
+            }
+        });
+
+        $response = $this->withToken('test-agent-key')
+            ->withHeader('X-Brevix-User-Id', $user->id)
+            ->getJson("/api/internal/agent-tools/companies/{$company->id}/risk-summary?period=2026-05");
+
+        $response->assertStatus(500)
+            ->assertJson(['error' => 'Agent tool could not complete the request safely']);
+        $this->assertArrayNotHasKey('exception', $response->json());
+        $this->assertArrayNotHasKey('trace', $response->json());
     }
 
     public function test_company_context_returns_authorized_company_context(): void
