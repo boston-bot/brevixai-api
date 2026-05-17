@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
 use App\Services\Agents\VendorRiskScoringService;
 use App\Services\Agents\ReconciliationRiskScoringService;
+use App\Services\Agents\EntityRelationshipRiskScoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -127,6 +128,32 @@ class AgentToolController extends Controller
             return response()->json($result);
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'reconciliation_risk', $e);
+        }
+    }
+
+    public function entityRelationshipRisk(
+        Request $request,
+        string $companyId,
+        EntityRelationshipRiskScoringService $entityRelationshipRiskService
+    ): JsonResponse {
+        if (!Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (!$user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        try {
+            if (!Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            $result = $entityRelationshipRiskService->scoreEntityRelationships($companyId);
+            return response()->json($result);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'entity_relationship_risk', $e);
         }
     }
 
