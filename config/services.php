@@ -42,4 +42,10 @@ return [
         'minor_version' => env('QB_MINOR_VERSION', '75'),
     ],
 
+    'brevix_agent' => [
+        'base_url' => env('BREVIX_AGENT_SERVICE_URL', 'http://localhost:8010'),
+        'api_key' => env('BREVIX_AGENT_SERVICE_KEY'),
+        'timeout' => env('BREVIX_AGENT_TIMEOUT', 60),
+    ],
+
 ];

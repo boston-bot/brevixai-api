@@ -15,6 +15,8 @@ use App\Http\Controllers\Api\ReconciliationController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\UploadController;
+use App\Http\Controllers\Chat\AgentChatController;
+use App\Http\Controllers\Internal\AgentToolController;
 use Illuminate\Support\Facades\Route;
 
 // Public Auth Routes
@@ -25,6 +27,13 @@ Route::prefix('auth')->group(function () {
 
 // QBO Callback (Handles Intuit redirect, uses state nonce for security, no Auth required)
 Route::get('integrations/qbo/callback', [IntegrationController::class, 'qboCallback']);
+
+Route::prefix('internal/agent-tools')
+    ->middleware('agent.tool')
+    ->group(function () {
+        Route::get('/companies/{companyId}/context', [AgentToolController::class, 'companyContext']);
+        Route::get('/companies/{companyId}/risk-summary', [AgentToolController::class, 'riskSummary']);
+    });
 
 Route::middleware('auth:sanctum')->group(function () {
     // Protected Auth Routes
@@ -54,6 +63,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Chat
     Route::prefix('chat')->group(function () {
+        Route::post('/agent/messages', [AgentChatController::class, 'store']);
         Route::get('/stream', [ChatController::class, 'stream']);
         Route::get('/usage', [ChatController::class, 'usage']);
         Route::get('/sessions', [ChatController::class, 'index']);
