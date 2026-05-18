@@ -36,6 +36,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/vendor-risk', [AgentToolController::class, 'vendorRisk']);
         Route::get('/company/{companyId}/reconciliation-risk', [AgentToolController::class, 'reconciliationRisk']);
         Route::get('/company/{companyId}/entity-relationship-risk', [AgentToolController::class, 'entityRelationshipRisk']);
+        Route::get('/company/{companyId}/aggregate-risk-summary', [AgentToolController::class, 'aggregateRiskSummary']);
     });
 
 Route::middleware('auth:sanctum')->group(function () {

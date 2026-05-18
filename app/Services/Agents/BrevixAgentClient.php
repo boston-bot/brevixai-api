@@ -28,7 +28,10 @@ class BrevixAgentClient
             ->post("{$baseUrl}/agent/run", $payload);
 
         if ($response->failed()) {
-            throw new RuntimeException('Brevix agent service request failed.', $response->status());
+            throw new RuntimeException(
+                sprintf('Brevix agent service request failed with status %d.', $response->status()),
+                $response->status()
+            );
         }
 
         $body = $response->json();

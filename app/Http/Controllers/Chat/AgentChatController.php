@@ -67,6 +67,8 @@ class AgentChatController extends Controller
         ]);
 
         try {
+            $pageContext = $validated['page_context'] ?? (object) [];
+
             $agentResponse = $agentClient->run([
                 'agent_run_id' => $agentRun->id,
                 'company_id' => $companyId,
@@ -76,7 +78,7 @@ class AgentChatController extends Controller
                 'requested_action' => $validated['requested_action'] ?? 'risk_review',
                 'date_range' => $validated['date_range'] ?? null,
                 'max_response_size' => $maxResponseSize,
-                'page_context' => $validated['page_context'] ?? [],
+                'page_context' => $pageContext,
             ]);
 
             $steps = is_array($agentResponse['steps'] ?? null) ? $agentResponse['steps'] : [];
@@ -132,6 +134,7 @@ class AgentChatController extends Controller
                 'company_id' => $companyId,
                 'user_id' => $request->user()->id,
                 'error_class' => $e::class,
+                'error_code' => $e->getCode() ?: null,
             ]);
 
             return response()->json([

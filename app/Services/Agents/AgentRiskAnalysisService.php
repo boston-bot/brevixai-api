@@ -22,6 +22,9 @@ class AgentRiskAnalysisService
         $infoCount = $alerts->where('severity', 'info')->count();
         $riskScore = min(100, ($criticalCount * 20) + ($warningCount * 10) + ($infoCount * 4));
 
+        $aggregateService = app(AggregateRiskSummaryService::class);
+        $aggregateResult = $aggregateService->getAggregateRiskSummary($companyId);
+
         return [
             'company_id' => $companyId,
             'risk_score' => $riskScore,
@@ -36,6 +39,7 @@ class AgentRiskAnalysisService
                     ->count(),
             ],
             'alert_breakdown' => $alerts->countBy('rule_key')->all(),
+            'aggregate_summary' => $aggregateResult,
         ];
     }
 

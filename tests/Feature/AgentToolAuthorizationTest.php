@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -20,6 +21,12 @@ class AgentToolAuthorizationTest extends TestCase
 
         config(['services.brevix_agent.api_key' => 'test-agent-key']);
 
+        Schema::dropIfExists('reconciliation_mismatches');
+        Schema::dropIfExists('transaction_reviews');
+        Schema::dropIfExists('audit_cases');
+        Schema::dropIfExists('alerts');
+        Schema::dropIfExists('reconciliation_results');
+        Schema::dropIfExists('all_transactions');
         Schema::dropIfExists('uploads');
         Schema::dropIfExists('users');
         Schema::dropIfExists('companies');
@@ -120,6 +127,107 @@ class AgentToolAuthorizationTest extends TestCase
             ->assertJsonPath('user_role', 'owner');
     }
 
+    public function test_company_context_can_return_sanitized_transaction_summary(): void
+    {
+        [$company, $user] = $this->createCompanyUser(industry: 'Retail');
+        $this->createTransactionToolTables();
+
+        DB::table('all_transactions')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'company_id' => $company->id,
+                'date' => '2026-05-17',
+                'department' => 'Finance',
+                'vendor_customer' => 'Acme Supplies',
+                'type' => 'expense',
+                'category' => 'Office Supplies',
+                'payment_method' => 'card',
+                'amount' => 125.50,
+                'invoice_ref' => 'INV-100',
+                'memo' => 'Office supplies order',
+                'anomaly_flag' => false,
+                'anomaly_reason' => null,
+                'source_type' => 'file_upload',
+                'source_name' => 'May ledger',
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'company_id' => $company->id,
+                'date' => '2026-05-01',
+                'department' => 'Finance',
+                'vendor_customer' => 'Older Vendor',
+                'type' => 'expense',
+                'category' => 'Services',
+                'payment_method' => 'ach',
+                'amount' => 300.00,
+                'invoice_ref' => 'INV-099',
+                'memo' => 'Outside range',
+                'anomaly_flag' => false,
+                'anomaly_reason' => null,
+                'source_type' => 'file_upload',
+                'source_name' => 'May ledger',
+            ],
+        ]);
+
+        $this->withToken('test-agent-key')
+            ->withHeader('X-Brevix-User-Id', $user->id)
+            ->getJson("/api/internal/agent-tools/companies/{$company->id}/context?include_transactions=1&date_from=2026-05-14&date_to=2026-05-18&limit=5")
+            ->assertOk()
+            ->assertJsonPath('transaction_summary.total', 1)
+            ->assertJsonPath('transaction_summary.returned_count', 1)
+            ->assertJsonPath('transaction_summary.transactions.0.vendor', 'Acme Supplies')
+            ->assertJsonPath('transaction_summary.transactions.0.amount', 125.5)
+            ->assertJsonMissingPath('transaction_summary.transactions.0.memo')
+            ->assertJsonMissingPath('transaction_summary.transactions.0.invoice_ref');
+    }
+
+    public function test_company_context_can_return_sanitized_dashboard_summary(): void
+    {
+        [$company, $user] = $this->createCompanyUser(industry: 'Retail');
+        $this->createDashboardToolTables();
+
+        DB::table('all_transactions')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'company_id' => $company->id,
+                'date' => now()->format('Y-m-d'),
+                'vendor_customer' => 'Acme Supplies',
+                'amount' => 125.50,
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'company_id' => $company->id,
+                'date' => now()->format('Y-m-d'),
+                'vendor_customer' => 'Northstar Consulting',
+                'amount' => 2500.00,
+            ],
+        ]);
+        DB::table('alerts')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'company_id' => $company->id,
+                'rule_key' => 'duplicate_invoice',
+                'title' => 'Sensitive alert title should not be returned',
+                'detail' => 'Sensitive alert detail should not be returned',
+                'severity' => 'warning',
+                'status' => 'open',
+                'created_at' => now(),
+            ],
+        ]);
+
+        $this->withToken('test-agent-key')
+            ->withHeader('X-Brevix-User-Id', $user->id)
+            ->getJson("/api/internal/agent-tools/companies/{$company->id}/context?include_dashboard=1")
+            ->assertOk()
+            ->assertJsonPath('dashboard_summary.risk_score', 10)
+            ->assertJsonPath('dashboard_summary.total_transactions', 2)
+            ->assertJsonPath('dashboard_summary.flagged_alerts', 1)
+            ->assertJsonPath('dashboard_summary.vendors_monitored', 2)
+            ->assertJsonMissingPath('dashboard_summary.recentAlerts')
+            ->assertJsonMissingPath('dashboard_summary.alertBreakdown')
+            ->assertJsonMissing(['title' => 'Sensitive alert title should not be returned']);
+    }
+
     /**
      * @return array{0: Company, 1: User}
      */
@@ -144,5 +252,48 @@ class AgentToolAuthorizationTest extends TestCase
         $user->save();
 
         return [$company, $user];
+    }
+
+    private function createTransactionToolTables(): void
+    {
+        Schema::create('all_transactions', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->date('date')->nullable();
+            $table->text('department')->nullable();
+            $table->text('vendor_customer')->nullable();
+            $table->text('type')->nullable();
+            $table->text('category')->nullable();
+            $table->text('payment_method')->nullable();
+            $table->decimal('amount', 14, 2)->nullable();
+            $table->text('invoice_ref')->nullable();
+            $table->text('memo')->nullable();
+            $table->boolean('anomaly_flag')->default(false);
+            $table->text('anomaly_reason')->nullable();
+            $table->text('source_type')->nullable();
+            $table->text('source_name')->nullable();
+        });
+    }
+
+    private function createDashboardToolTables(): void
+    {
+        Schema::create('all_transactions', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->date('date')->nullable();
+            $table->text('vendor_customer')->nullable();
+            $table->decimal('amount', 14, 2)->nullable();
+        });
+
+        Schema::create('alerts', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->string('rule_key')->nullable();
+            $table->string('title')->nullable();
+            $table->text('detail')->nullable();
+            $table->string('severity')->nullable();
+            $table->string('status')->nullable();
+            $table->timestamp('created_at')->nullable();
+        });
     }
 }
