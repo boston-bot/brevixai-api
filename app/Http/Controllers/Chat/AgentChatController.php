@@ -16,6 +16,7 @@ use Throwable;
 class AgentChatController extends Controller
 {
     private const DEFAULT_MAX_RESPONSE_SIZE = 4000;
+
     private const MAX_RESPONSE_SIZE = 8000;
 
     /** @var array<int, string> */
@@ -34,13 +35,13 @@ class AgentChatController extends Controller
             'date_range' => ['sometimes', 'array:start_date,end_date'],
             'date_range.start_date' => ['required_with:date_range', 'date_format:Y-m-d', 'before_or_equal:date_range.end_date'],
             'date_range.end_date' => ['required_with:date_range', 'date_format:Y-m-d', 'after_or_equal:date_range.start_date'],
-            'max_response_size' => ['sometimes', 'integer', 'min:256', 'max:' . self::MAX_RESPONSE_SIZE],
+            'max_response_size' => ['sometimes', 'integer', 'min:256', 'max:'.self::MAX_RESPONSE_SIZE],
             'page_context' => ['sometimes', 'array'],
             'page_context.selected_period' => ['nullable', 'date_format:Y-m'],
         ]);
 
         $companyId = $request->user()->company_id;
-        if (!$companyId) {
+        if (! $companyId) {
             return response()->json(['error' => 'No company associated with account'], 403);
         }
 
@@ -48,7 +49,7 @@ class AgentChatController extends Controller
             return response()->json(['error' => 'Cannot run agent for another company'], 403);
         }
 
-        $maxResponseSize = (int)($validated['max_response_size'] ?? self::DEFAULT_MAX_RESPONSE_SIZE);
+        $maxResponseSize = (int) ($validated['max_response_size'] ?? self::DEFAULT_MAX_RESPONSE_SIZE);
 
         $agentRun = AgentRun::create([
             'company_id' => $companyId,
@@ -79,6 +80,8 @@ class AgentChatController extends Controller
                 'date_range' => $validated['date_range'] ?? null,
                 'max_response_size' => $maxResponseSize,
                 'page_context' => $pageContext,
+                'optional_deterministic_tools' => $this->optionalDeterministicTools($companyId),
+                'tool_policy' => $this->toolPolicy(),
             ]);
 
             $steps = is_array($agentResponse['steps'] ?? null) ? $agentResponse['steps'] : [];
@@ -88,8 +91,8 @@ class AgentChatController extends Controller
             $toolEndpoints = $this->toolEndpointsFromSteps($steps);
             $message = $this->boundedString($agentResponse['message'] ?? '', $maxResponseSize);
             $intent = $this->boundedString($agentResponse['intent'] ?? 'unknown', 120);
-            $requiresReview = (bool)($agentResponse['requires_review'] ?? false) || collect($actions)->contains(
-                fn (array $action): bool => (bool)($action['requires_approval'] ?? true)
+            $requiresReview = (bool) ($agentResponse['requires_review'] ?? false) || collect($actions)->contains(
+                fn (array $action): bool => (bool) ($action['requires_approval'] ?? true)
             );
 
             $agentRun->update([
@@ -154,11 +157,11 @@ class AgentChatController extends Controller
         foreach ($steps as $step) {
             AgentStep::create([
                 'agent_run_id' => $agentRun->id,
-                'step_name' => (string)($step['step_name'] ?? 'unknown'),
-                'step_type' => (string)($step['step_type'] ?? 'graph_node'),
+                'step_name' => (string) ($step['step_name'] ?? 'unknown'),
+                'step_type' => (string) ($step['step_type'] ?? 'graph_node'),
                 'input_payload' => $step['input_payload'] ?? null,
                 'output_payload' => $step['output_payload'] ?? null,
-                'status' => (string)($step['status'] ?? 'completed'),
+                'status' => (string) ($step['status'] ?? 'completed'),
                 'started_at' => $step['started_at'] ?? null,
                 'completed_at' => $step['completed_at'] ?? null,
                 'error_message' => $step['error_message'] ?? null,
@@ -172,7 +175,7 @@ class AgentChatController extends Controller
         $blockedCount = 0;
 
         foreach ($actions as $action) {
-            if (!is_array($action)) {
+            if (! is_array($action)) {
                 $blockedCount++;
                 Log::warning('agent.action_gate.blocked', [
                     'agent_run_id' => $agentRun->id,
@@ -181,11 +184,12 @@ class AgentChatController extends Controller
                     'action_type' => 'invalid',
                     'reason' => 'invalid_action_shape',
                 ]);
+
                 continue;
             }
 
-            $actionType = (string)($action['type'] ?? 'unknown');
-            if (!in_array($actionType, self::SUPPORTED_RECOMMENDED_ACTIONS, true)) {
+            $actionType = (string) ($action['type'] ?? 'unknown');
+            if (! in_array($actionType, self::SUPPORTED_RECOMMENDED_ACTIONS, true)) {
                 $blockedCount++;
                 Log::warning('agent.action_gate.blocked', [
                     'agent_run_id' => $agentRun->id,
@@ -194,6 +198,7 @@ class AgentChatController extends Controller
                     'action_type' => $actionType,
                     'reason' => 'unsupported_action',
                 ]);
+
                 continue;
             }
 
@@ -246,7 +251,39 @@ class AgentChatController extends Controller
     }
 
     /**
-     * @param array<int, mixed> $steps
+     * Advertise approved Laravel tool endpoints to the LangGraph service without exposing database access.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function optionalDeterministicTools(string $companyId): array
+    {
+        return [
+            'aggregate_risk_summary' => [
+                'method' => 'GET',
+                'path' => "/api/internal/agent-tools/company/{$companyId}/aggregate-risk-summary",
+                'optional' => true,
+                'deterministic' => true,
+                'purpose' => 'Use during fraud or risk analysis when a cross-domain deterministic score and evidence summary would improve the response.',
+                'score_authority' => 'laravel',
+                'requires_user_context_header' => true,
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function toolPolicy(): array
+    {
+        return [
+            'database_access' => 'forbidden',
+            'autonomous_actions' => 'forbidden',
+            'score_recalculation' => 'forbidden',
+        ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $steps
      * @return array<int, string>
      */
     private function toolEndpointsFromSteps(array $steps): array
@@ -254,11 +291,11 @@ class AgentChatController extends Controller
         $endpoints = [];
 
         foreach ($steps as $step) {
-            if (!is_array($step)) {
+            if (! is_array($step)) {
                 continue;
             }
 
-            $stepType = (string)($step['step_type'] ?? '');
+            $stepType = (string) ($step['step_type'] ?? '');
             $input = is_array($step['input_payload'] ?? null) ? $step['input_payload'] : [];
             $output = is_array($step['output_payload'] ?? null) ? $step['output_payload'] : [];
             $endpoint = $output['endpoint'] ?? $output['tool'] ?? $input['endpoint'] ?? $input['tool'] ?? null;

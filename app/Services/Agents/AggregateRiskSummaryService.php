@@ -4,141 +4,72 @@ namespace App\Services\Agents;
 
 class AggregateRiskSummaryService
 {
+    private const RISK_DOMAIN_VENDOR = 'vendor_risk';
+
+    private const RISK_DOMAIN_RECONCILIATION = 'reconciliation_risk';
+
+    private const RISK_DOMAIN_ENTITY_RELATIONSHIP = 'entity_relationship_risk';
+
+    public function __construct(
+        private readonly VendorRiskScoringService $vendorRiskService,
+        private readonly ReconciliationRiskScoringService $reconciliationRiskService,
+        private readonly EntityRelationshipRiskScoringService $entityRelationshipRiskService,
+    ) {}
+
     /**
      * Compute a comprehensive, explainable aggregate risk summary for a company.
+     *
+     * @return array<string, mixed>
      */
     public function getAggregateRiskSummary(string $companyId): array
     {
-        $vendorRiskService = app(VendorRiskScoringService::class);
-        $reconciliationRiskService = app(ReconciliationRiskScoringService::class);
-        $entityRelationshipRiskService = app(EntityRelationshipRiskScoringService::class);
+        $vendorScores = $this->vendorRiskService->scoreAllVendors($companyId);
+        $vendorRiskScore = $this->highestVendorRiskScore($vendorScores);
 
-        // Fetch each domain score
-        $vendorScores = $vendorRiskService->scoreAllVendors($companyId);
-        $vendorRiskScore = !empty($vendorScores) ? (int)max(array_column($vendorScores, 'vendor_risk_score')) : 0;
+        $reconciliationResult = $this->reconciliationRiskService->scoreReconciliation($companyId);
+        $reconciliationRiskScore = (int) ($reconciliationResult['reconciliation_risk_score'] ?? 0);
 
-        $reconciliationResult = $reconciliationRiskService->scoreReconciliation($companyId);
-        $reconciliationRiskScore = (int)$reconciliationResult['reconciliation_risk_score'];
+        $entityResult = $this->entityRelationshipRiskService->scoreEntityRelationships($companyId);
+        $entityRiskScore = (int) ($entityResult['entity_relationship_risk_score'] ?? 0);
 
-        $entityResult = $entityRelationshipRiskService->scoreEntityRelationships($companyId);
-        $entityRiskScore = (int)$entityResult['entity_relationship_risk_score'];
-
-        // Compute overall risk score as the maximum of all domains
         $overallScore = max($vendorRiskScore, $reconciliationRiskScore, $entityRiskScore);
 
-        $overallRiskLevel = 'low';
-        if ($overallScore >= 90) {
-            $overallRiskLevel = 'critical';
-        } elseif ($overallScore >= 70) {
-            $overallRiskLevel = 'high';
-        } elseif ($overallScore >= 40) {
-            $overallRiskLevel = 'medium';
-        }
-
-        // Map domains to structures
         $contributingRiskDomains = [
-            'vendor_risk' => [
+            self::RISK_DOMAIN_VENDOR => [
                 'score' => $vendorRiskScore,
                 'risk_level' => $this->mapRiskLevel($vendorRiskScore),
             ],
-            'reconciliation_risk' => [
+            self::RISK_DOMAIN_RECONCILIATION => [
                 'score' => $reconciliationRiskScore,
                 'risk_level' => $this->mapRiskLevel($reconciliationRiskScore),
             ],
-            'entity_relationship_risk' => [
+            self::RISK_DOMAIN_ENTITY_RELATIONSHIP => [
                 'score' => $entityRiskScore,
                 'risk_level' => $this->mapRiskLevel($entityRiskScore),
             ],
         ];
 
-        // Gather highest risk findings across all domains
-        $highestRiskFindings = [];
-        
-        foreach ($vendorScores as $vs) {
-            foreach ($vs['triggered_rules'] as $rule) {
-                $highestRiskFindings[] = [
-                    'domain' => 'vendor_risk',
-                    'source' => $vs['vendor_name'],
-                    'rule_key' => $rule['rule_key'],
-                    'name' => $rule['name'],
-                    'weight' => $rule['weight'],
-                    'explanation' => $rule['explanation'],
-                ];
-            }
-        }
-        
-        foreach ($reconciliationResult['triggered_rules'] as $rule) {
-            $highestRiskFindings[] = [
-                'domain' => 'reconciliation_risk',
-                'source' => 'General Ledger / Bank Statement',
-                'rule_key' => $rule['rule_key'],
-                'name' => $rule['name'],
-                'weight' => $rule['weight'],
-                'explanation' => $rule['explanation'],
-            ];
-        }
-
-        foreach ($entityResult['triggered_rules'] as $rule) {
-            $highestRiskFindings[] = [
-                'domain' => 'entity_relationship_risk',
-                'source' => 'Entity Graph / Metadata',
-                'rule_key' => $rule['rule_key'],
-                'name' => $rule['name'],
-                'weight' => $rule['weight'],
-                'explanation' => $rule['explanation'],
-            ];
-        }
-
-        // Sort findings by weight descending
-        usort($highestRiskFindings, fn($a, $b) => $b['weight'] <=> $a['weight']);
-        // Keep top 10 highest risk findings
-        $highestRiskFindings = array_slice($highestRiskFindings, 0, 10);
-
-        // Gather triggered rules summary (unique rules triggered count per domain)
-        $uniqueVendorRules = [];
-        foreach ($vendorScores as $vs) {
-            foreach ($vs['triggered_rules'] as $r) {
-                $uniqueVendorRules[$r['rule_key']] = true;
-            }
-        }
         $triggeredRulesSummary = [
-            'vendor_risk' => count($uniqueVendorRules),
-            'reconciliation_risk' => count($reconciliationResult['triggered_rules']),
-            'entity_relationship_risk' => count($entityResult['triggered_rules']),
+            self::RISK_DOMAIN_VENDOR => $this->uniqueVendorRuleCount($vendorScores),
+            self::RISK_DOMAIN_RECONCILIATION => count($reconciliationResult['triggered_rules'] ?? []),
+            self::RISK_DOMAIN_ENTITY_RELATIONSHIP => count($entityResult['triggered_rules'] ?? []),
         ];
 
-        // Prioritize actions based on domains
-        $recommendedNextActions = [];
-        if ($overallScore >= 90) {
-            $recommendedNextActions[] = 'Halt all pending automated disbursements immediately and schedule forensic investigation.';
-        }
-        
-        $highRiskVendors = array_filter($vendorScores, fn($v) => $v['vendor_risk_score'] >= 70);
-        if (!empty($highRiskVendors)) {
-            $names = array_slice(array_column($highRiskVendors, 'vendor_name'), 0, 3);
-            $recommendedNextActions[] = 'Audit credentials and onboarding files for high-risk vendors: ' . implode(', ', $names) . '.';
-        }
-        if ($reconciliationRiskScore >= 40) {
-            $recommendedNextActions[] = 'Enforce dual-authorization on all manual general ledger adjustments and reconcile stale unmatched balances.';
-        }
-        if ($entityRiskScore >= 40) {
-            $recommendedNextActions[] = 'Merge duplicate vendor spelling profiles and perform employee-vendor relationship conflict review.';
-        }
-        if (empty($recommendedNextActions)) {
-            $recommendedNextActions[] = 'Continue routine automated continuous monitoring and ledger hygiene audits.';
-        }
-
-        // Supporting evidence summaries
         $supportingEvidenceSummary = [
-            'vendor_risk' => [
+            self::RISK_DOMAIN_VENDOR => [
                 'total_vendors_analyzed' => count($vendorScores),
-                'flagged_vendors' => count(array_filter($vendorScores, fn($v) => $v['vendor_risk_score'] >= 40)),
+                'flagged_vendors' => count(array_filter(
+                    $vendorScores,
+                    fn (array $vendor): bool => (int) ($vendor['vendor_risk_score'] ?? 0) >= 40
+                )),
             ],
-            'reconciliation_risk' => [
-                'triggered_anomalies' => count($reconciliationResult['triggered_rules']),
-                'stale_unreconciled_items_count' => count($reconciliationResult['supporting_evidence']['stale_unreconciled'] ?? []),
+            self::RISK_DOMAIN_RECONCILIATION => [
+                'triggered_anomalies' => count($reconciliationResult['triggered_rules'] ?? []),
+                'stale_unreconciled_items_count' => count(
+                    $reconciliationResult['supporting_evidence']['stale_unreconciled']['discrepancies'] ?? []
+                ),
             ],
-            'entity_relationship_risk' => [
+            self::RISK_DOMAIN_ENTITY_RELATIONSHIP => [
                 'overlapping_employees_count' => count($entityResult['supporting_evidence']['employee_vendor_overlap']['overlaps'] ?? []),
                 'duplicate_vendor_identity_clusters_count' => count($entityResult['supporting_evidence']['duplicate_vendor_cluster']['clusters'] ?? []),
             ],
@@ -147,20 +78,164 @@ class AggregateRiskSummaryService
         return [
             'company_id' => $companyId,
             'overall_risk_score' => $overallScore,
-            'overall_risk_level' => $overallRiskLevel,
+            'overall_risk_level' => $this->mapRiskLevel($overallScore),
             'contributing_risk_domains' => $contributingRiskDomains,
-            'highest_risk_findings' => $highestRiskFindings,
+            'highest_risk_findings' => $this->highestRiskFindings($vendorScores, $reconciliationResult, $entityResult),
             'triggered_rules_summary' => $triggeredRulesSummary,
-            'recommended_next_actions' => $recommendedNextActions,
+            'recommended_next_actions' => $this->recommendedNextActions(
+                $overallScore,
+                $vendorScores,
+                $reconciliationRiskScore,
+                $entityRiskScore,
+            ),
             'supporting_evidence_summary' => $supportingEvidenceSummary,
         ];
     }
 
+    /**
+     * @param  array<int, array<string, mixed>>  $vendorScores
+     */
+    private function highestVendorRiskScore(array $vendorScores): int
+    {
+        if ($vendorScores === []) {
+            return 0;
+        }
+
+        return max(array_map(
+            fn (array $vendor): int => (int) ($vendor['vendor_risk_score'] ?? 0),
+            $vendorScores
+        ));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $vendorScores
+     */
+    private function uniqueVendorRuleCount(array $vendorScores): int
+    {
+        $uniqueVendorRules = [];
+
+        foreach ($vendorScores as $vendorScore) {
+            foreach ($vendorScore['triggered_rules'] ?? [] as $rule) {
+                $uniqueVendorRules[(string) ($rule['rule_key'] ?? 'unknown_rule')] = true;
+            }
+        }
+
+        return count($uniqueVendorRules);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $vendorScores
+     * @param  array<string, mixed>  $reconciliationResult
+     * @param  array<string, mixed>  $entityResult
+     * @return array<int, array<string, mixed>>
+     */
+    private function highestRiskFindings(
+        array $vendorScores,
+        array $reconciliationResult,
+        array $entityResult,
+    ): array {
+        $findings = [];
+
+        foreach ($vendorScores as $vendorScore) {
+            foreach ($vendorScore['triggered_rules'] ?? [] as $rule) {
+                $findings[] = $this->riskFinding(
+                    self::RISK_DOMAIN_VENDOR,
+                    (string) ($vendorScore['vendor_name'] ?? 'Unknown Vendor'),
+                    $rule,
+                );
+            }
+        }
+
+        foreach ($reconciliationResult['triggered_rules'] ?? [] as $rule) {
+            $findings[] = $this->riskFinding(
+                self::RISK_DOMAIN_RECONCILIATION,
+                'General Ledger / Bank Statement',
+                $rule,
+            );
+        }
+
+        foreach ($entityResult['triggered_rules'] ?? [] as $rule) {
+            $findings[] = $this->riskFinding(
+                self::RISK_DOMAIN_ENTITY_RELATIONSHIP,
+                'Entity Graph / Metadata',
+                $rule,
+            );
+        }
+
+        usort($findings, function (array $a, array $b): int {
+            return [-(int) $a['weight'], $a['domain'], $a['source'], $a['rule_key']]
+                <=> [-(int) $b['weight'], $b['domain'], $b['source'], $b['rule_key']];
+        });
+
+        return array_slice($findings, 0, 10);
+    }
+
+    /**
+     * @param  array<string, mixed>  $rule
+     * @return array<string, mixed>
+     */
+    private function riskFinding(string $domain, string $source, array $rule): array
+    {
+        return [
+            'domain' => $domain,
+            'source' => $source,
+            'rule_key' => (string) ($rule['rule_key'] ?? 'unknown_rule'),
+            'name' => (string) ($rule['name'] ?? 'Unknown Rule'),
+            'weight' => (int) ($rule['weight'] ?? 0),
+            'explanation' => (string) ($rule['explanation'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $vendorScores
+     * @return array<int, string>
+     */
+    private function recommendedNextActions(
+        int $overallScore,
+        array $vendorScores,
+        int $reconciliationRiskScore,
+        int $entityRiskScore,
+    ): array {
+        $actions = [];
+
+        if ($overallScore >= 90) {
+            $actions[] = 'Require human review before any pending disbursements tied to the highest-risk findings are approved.';
+        }
+
+        $highRiskVendors = array_filter(
+            $vendorScores,
+            fn (array $vendor): bool => (int) ($vendor['vendor_risk_score'] ?? 0) >= 70
+        );
+
+        if ($highRiskVendors !== []) {
+            $names = array_slice(array_filter(array_column($highRiskVendors, 'vendor_name')), 0, 3);
+            $actions[] = $names === []
+                ? 'Audit credentials and onboarding files for high-risk vendors identified by deterministic vendor risk scoring.'
+                : 'Audit credentials and onboarding files for high-risk vendors: '.implode(', ', $names).'.';
+        }
+
+        if ($reconciliationRiskScore >= 40) {
+            $actions[] = 'Review manual general ledger adjustments and reconcile stale unmatched balances.';
+        }
+
+        if ($entityRiskScore >= 40) {
+            $actions[] = 'Review duplicate vendor profiles and employee-vendor relationship conflicts.';
+        }
+
+        if ($actions === []) {
+            $actions[] = 'Continue routine automated continuous monitoring and ledger hygiene audits.';
+        }
+
+        return $actions;
+    }
+
     private function mapRiskLevel(int $score): string
     {
-        if ($score >= 90) return 'critical';
-        if ($score >= 70) return 'high';
-        if ($score >= 40) return 'medium';
-        return 'low';
+        return match (true) {
+            $score >= 90 => 'critical',
+            $score >= 70 => 'high',
+            $score >= 40 => 'medium',
+            default => 'low',
+        };
     }
 }

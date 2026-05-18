@@ -249,6 +249,51 @@ class AgentChatControllerTest extends TestCase
         ]);
     }
 
+    public function test_agent_chat_advertises_aggregate_risk_summary_as_optional_deterministic_tool(): void
+    {
+        [$company, $user] = $this->createCompanyUser('Company A');
+        Sanctum::actingAs($user);
+
+        Http::fake([
+            'http://agent.test/agent/run' => Http::response([
+                'intent' => 'fraud_pattern_search',
+                'message' => 'Risk review complete.',
+                'findings' => [],
+                'recommended_actions' => [],
+                'steps' => [],
+            ]),
+        ]);
+
+        $this->postJson('/api/chat/agent/messages', [
+            'company_id' => $company->id,
+            'message' => 'Review aggregate risk.',
+        ])->assertOk();
+
+        Http::assertSent(function ($request) use ($company): bool {
+            $tools = $request['optional_deterministic_tools'] ?? null;
+            $policy = $request['tool_policy'] ?? null;
+
+            if (! is_array($tools) || ! is_array($policy)) {
+                return false;
+            }
+
+            $aggregateTool = $tools['aggregate_risk_summary'] ?? null;
+            if (! is_array($aggregateTool)) {
+                return false;
+            }
+
+            return $aggregateTool['method'] === 'GET'
+                && $aggregateTool['path'] === "/api/internal/agent-tools/company/{$company->id}/aggregate-risk-summary"
+                && $aggregateTool['optional'] === true
+                && $aggregateTool['deterministic'] === true
+                && $aggregateTool['score_authority'] === 'laravel'
+                && ! array_key_exists('database_url', $aggregateTool)
+                && $policy['database_access'] === 'forbidden'
+                && $policy['autonomous_actions'] === 'forbidden'
+                && $policy['score_recalculation'] === 'forbidden';
+        });
+    }
+
     public function test_agent_chat_returns_safe_contract_when_agent_service_is_unavailable(): void
     {
         [$company, $user] = $this->createCompanyUser('Company A');
@@ -301,7 +346,7 @@ class AgentChatControllerTest extends TestCase
 
         $user = new User([
             'company_id' => $company->id,
-            'email' => Str::uuid() . '@example.com',
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
             'first_name' => 'Test',
             'last_name' => 'User',
