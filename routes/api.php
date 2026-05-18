@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AccountingController;
+use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
@@ -37,6 +37,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/reconciliation-risk', [AgentToolController::class, 'reconciliationRisk']);
         Route::get('/company/{companyId}/entity-relationship-risk', [AgentToolController::class, 'entityRelationshipRisk']);
         Route::get('/company/{companyId}/aggregate-risk-summary', [AgentToolController::class, 'aggregateRiskSummary']);
+        Route::get('/company/{companyId}/alert-recommendations', [AgentToolController::class, 'alertRecommendations']);
     });
 
 Route::middleware('auth:sanctum')->group(function () {

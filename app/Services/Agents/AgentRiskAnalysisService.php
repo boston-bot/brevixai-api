@@ -25,6 +25,9 @@ class AgentRiskAnalysisService
         $aggregateService = app(AggregateRiskSummaryService::class);
         $aggregateResult = $aggregateService->getAggregateRiskSummary($companyId);
 
+        $alertRecommendationService = app(AlertRecommendationService::class);
+        $alertRecommendations = $alertRecommendationService->getAlertRecommendations($companyId);
+
         return [
             'company_id' => $companyId,
             'risk_score' => $riskScore,
@@ -40,6 +43,7 @@ class AgentRiskAnalysisService
             ],
             'alert_breakdown' => $alerts->countBy('rule_key')->all(),
             'aggregate_summary' => $aggregateResult,
+            'alert_recommendations' => $alertRecommendations,
         ];
     }
 

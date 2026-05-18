@@ -7,10 +7,11 @@ use App\Models\Company;
 use App\Models\Upload;
 use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
-use App\Services\Agents\VendorRiskScoringService;
-use App\Services\Agents\ReconciliationRiskScoringService;
-use App\Services\Agents\EntityRelationshipRiskScoringService;
 use App\Services\Agents\AggregateRiskSummaryService;
+use App\Services\Agents\AlertRecommendationService;
+use App\Services\Agents\EntityRelationshipRiskScoringService;
+use App\Services\Agents\ReconciliationRiskScoringService;
+use App\Services\Agents\VendorRiskScoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,12 +23,12 @@ class AgentToolController extends Controller
 {
     public function companyContext(Request $request, string $companyId): JsonResponse
     {
-        if (!Str::isUuid($companyId)) {
+        if (! Str::isUuid($companyId)) {
             return response()->json(['error' => 'Invalid company id'], 422);
         }
 
         $user = $this->authorizedUser($request, $companyId);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
@@ -38,7 +39,7 @@ class AgentToolController extends Controller
 
         try {
             $company = Company::find($companyId);
-            if (!$company) {
+            if (! $company) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
@@ -67,22 +68,22 @@ class AgentToolController extends Controller
 
     public function riskSummary(Request $request, string $companyId, AgentRiskAnalysisService $riskAnalysisService): JsonResponse
     {
-        if (!Str::isUuid($companyId)) {
+        if (! Str::isUuid($companyId)) {
             return response()->json(['error' => 'Invalid company id'], 422);
         }
 
         $user = $this->authorizedUser($request, $companyId);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
         $period = $request->query('period');
-        if ($period !== null && (!is_string($period) || !preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period))) {
+        if ($period !== null && (! is_string($period) || ! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period))) {
             return response()->json(['error' => 'Invalid period. Use YYYY-MM.'], 422);
         }
 
         try {
-            if (!Company::where('id', $companyId)->exists()) {
+            if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
@@ -94,28 +95,30 @@ class AgentToolController extends Controller
 
     public function vendorRisk(Request $request, string $companyId, VendorRiskScoringService $vendorRiskService): JsonResponse
     {
-        if (!Str::isUuid($companyId)) {
+        if (! Str::isUuid($companyId)) {
             return response()->json(['error' => 'Invalid company id'], 422);
         }
 
         $user = $this->authorizedUser($request, $companyId);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
         $vendorName = $request->query('vendor');
 
         try {
-            if (!Company::where('id', $companyId)->exists()) {
+            if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
             if ($vendorName !== null && $vendorName !== '') {
                 $result = $vendorRiskService->scoreVendor($companyId, $vendorName);
+
                 return response()->json($result);
             }
 
             $result = $vendorRiskService->scoreAllVendors($companyId);
+
             return response()->json(['vendors' => $result]);
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'vendor_risk', $e);
@@ -127,21 +130,22 @@ class AgentToolController extends Controller
         string $companyId,
         ReconciliationRiskScoringService $reconciliationRiskService
     ): JsonResponse {
-        if (!Str::isUuid($companyId)) {
+        if (! Str::isUuid($companyId)) {
             return response()->json(['error' => 'Invalid company id'], 422);
         }
 
         $user = $this->authorizedUser($request, $companyId);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
         try {
-            if (!Company::where('id', $companyId)->exists()) {
+            if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
             $result = $reconciliationRiskService->scoreReconciliation($companyId);
+
             return response()->json($result);
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'reconciliation_risk', $e);
@@ -153,21 +157,22 @@ class AgentToolController extends Controller
         string $companyId,
         EntityRelationshipRiskScoringService $entityRelationshipRiskService
     ): JsonResponse {
-        if (!Str::isUuid($companyId)) {
+        if (! Str::isUuid($companyId)) {
             return response()->json(['error' => 'Invalid company id'], 422);
         }
 
         $user = $this->authorizedUser($request, $companyId);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
         try {
-            if (!Company::where('id', $companyId)->exists()) {
+            if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
             $result = $entityRelationshipRiskService->scoreEntityRelationships($companyId);
+
             return response()->json($result);
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'entity_relationship_risk', $e);
@@ -179,24 +184,52 @@ class AgentToolController extends Controller
         string $companyId,
         AggregateRiskSummaryService $aggregateRiskSummaryService
     ): JsonResponse {
-        if (!Str::isUuid($companyId)) {
+        if (! Str::isUuid($companyId)) {
             return response()->json(['error' => 'Invalid company id'], 422);
         }
 
         $user = $this->authorizedUser($request, $companyId);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
         try {
-            if (!Company::where('id', $companyId)->exists()) {
+            if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
             $result = $aggregateRiskSummaryService->getAggregateRiskSummary($companyId);
+
             return response()->json($result);
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'aggregate_risk_summary', $e);
+        }
+    }
+
+    public function alertRecommendations(
+        Request $request,
+        string $companyId,
+        AlertRecommendationService $alertRecommendationService
+    ): JsonResponse {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            $result = $alertRecommendationService->getAlertRecommendations($companyId);
+
+            return response()->json($result);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'alert_recommendations', $e);
         }
     }
 
@@ -212,7 +245,7 @@ class AgentToolController extends Controller
 
     private function transactionFilterValidationError(Request $request): ?JsonResponse
     {
-        if (!$this->shouldIncludeTransactions($request)) {
+        if (! $this->shouldIncludeTransactions($request)) {
             return null;
         }
 
@@ -220,7 +253,7 @@ class AgentToolController extends Controller
         $dateTo = $request->query('date_to');
 
         foreach (['date_from' => $dateFrom, 'date_to' => $dateTo] as $field => $value) {
-            if ($value !== null && (!is_string($value) || !$this->isDateString($value))) {
+            if ($value !== null && (! is_string($value) || ! $this->isDateString($value))) {
                 return response()->json(['error' => "Invalid {$field}. Use YYYY-MM-DD."], 422);
             }
         }
@@ -234,7 +267,7 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'Invalid limit. Use an integer from 1 to 20.'], 422);
         }
 
-        $limitValue = (int)($limit ?? 10);
+        $limitValue = (int) ($limit ?? 10);
         if ($limitValue < 1 || $limitValue > 20) {
             return response()->json(['error' => 'Invalid limit. Use an integer from 1 to 20.'], 422);
         }
@@ -245,12 +278,13 @@ class AgentToolController extends Controller
     private function isDateString(string $value): bool
     {
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+
         return $date !== false && $date->format('Y-m-d') === $value;
     }
 
     private function transactionSummary(Request $request, string $companyId): array
     {
-        $limit = min(max((int)$request->query('limit', 10), 1), 20);
+        $limit = min(max((int) $request->query('limit', 10), 1), 20);
         $filters = [
             'date_from' => $request->query('date_from'),
             'date_to' => $request->query('date_to'),
@@ -282,14 +316,14 @@ class AgentToolController extends Controller
             ->orderByDesc('id')
             ->limit($limit)
             ->get()
-            ->map(fn (object $transaction): array => $this->summarizeTransaction((array)$transaction))
+            ->map(fn (object $transaction): array => $this->summarizeTransaction((array) $transaction))
             ->values()
             ->all();
 
         return [
             'date_from' => $filters['date_from'],
             'date_to' => $filters['date_to'],
-            'total' => (int)$total,
+            'total' => (int) $total,
             'returned_count' => count($transactions),
             'transactions' => $transactions,
         ];
@@ -298,14 +332,14 @@ class AgentToolController extends Controller
     private function summarizeTransaction(array $transaction): array
     {
         return [
-            'id' => (string)($transaction['id'] ?? ''),
+            'id' => (string) ($transaction['id'] ?? ''),
             'date' => $transaction['date'] ?? null,
             'vendor' => $transaction['vendor_customer'] ?? null,
-            'amount' => (float)($transaction['amount'] ?? 0),
+            'amount' => (float) ($transaction['amount'] ?? 0),
             'type' => $transaction['type'] ?? null,
             'category' => $transaction['category'] ?? null,
-            'status' => (bool)($transaction['anomaly_flag'] ?? false) ? 'flagged' : 'completed',
-            'anomaly_flag' => (bool)($transaction['anomaly_flag'] ?? false),
+            'status' => (bool) ($transaction['anomaly_flag'] ?? false) ? 'flagged' : 'completed',
+            'anomaly_flag' => (bool) ($transaction['anomaly_flag'] ?? false),
         ];
     }
 
@@ -313,9 +347,9 @@ class AgentToolController extends Controller
     {
         $stats = DB::table('all_transactions')
             ->where('company_id', $companyId)
-            ->selectRaw("COUNT(*) AS total_transactions")
+            ->selectRaw('COUNT(*) AS total_transactions')
             ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(vendor_customer), '')) AS vendors_monitored")
-            ->selectRaw("COALESCE(SUM(ABS(amount)), 0) AS amount_reviewed")
+            ->selectRaw('COALESCE(SUM(ABS(amount)), 0) AS amount_reviewed')
             ->first();
 
         $openAlerts = DB::table('alerts')
@@ -328,21 +362,21 @@ class AgentToolController extends Controller
         return [
             'risk_score' => min(
                 100,
-                ((int)$criticalAlerts * 20)
-                + ((int)$warningAlerts * 10)
-                + max(0, (int)$flaggedAlerts - (int)$criticalAlerts - (int)$warningAlerts) * 4
+                ((int) $criticalAlerts * 20)
+                + ((int) $warningAlerts * 10)
+                + max(0, (int) $flaggedAlerts - (int) $criticalAlerts - (int) $warningAlerts) * 4
             ),
-            'total_transactions' => (int)($stats->total_transactions ?? 0),
-            'flagged_alerts' => (int)$flaggedAlerts,
-            'vendors_monitored' => (int)($stats->vendors_monitored ?? 0),
-            'amount_reviewed' => (float)($stats->amount_reviewed ?? 0),
+            'total_transactions' => (int) ($stats->total_transactions ?? 0),
+            'flagged_alerts' => (int) $flaggedAlerts,
+            'vendors_monitored' => (int) ($stats->vendors_monitored ?? 0),
+            'amount_reviewed' => (float) ($stats->amount_reviewed ?? 0),
         ];
     }
 
     private function authorizedUser(Request $request, string $companyId): ?User
     {
         $userId = $request->header('X-Brevix-User-Id');
-        if (!$userId) {
+        if (! $userId) {
             return null;
         }
 
@@ -365,7 +399,7 @@ class AgentToolController extends Controller
     {
         Log::warning('agent_tool.failed', [
             'tool_name' => $toolName,
-            'tool_endpoint' => $request->method() . ' ' . $request->path(),
+            'tool_endpoint' => $request->method().' '.$request->path(),
             'company_id' => $companyId,
             'user_id' => $userId,
             'agent_request_id' => $request->header('X-Brevix-Agent-Request-Id'),

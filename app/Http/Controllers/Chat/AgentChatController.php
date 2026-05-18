@@ -267,6 +267,15 @@ class AgentChatController extends Controller
                 'score_authority' => 'laravel',
                 'requires_user_context_header' => true,
             ],
+            'alert_recommendations' => [
+                'method' => 'GET',
+                'path' => "/api/internal/agent-tools/company/{$companyId}/alert-recommendations",
+                'optional' => true,
+                'deterministic' => true,
+                'purpose' => 'Use during fraud or risk analysis when deterministic alert recommendation drafts would improve the response.',
+                'recommendation_authority' => 'laravel',
+                'requires_user_context_header' => true,
+            ],
         ];
     }
 

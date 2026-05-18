@@ -249,7 +249,7 @@ class AgentChatControllerTest extends TestCase
         ]);
     }
 
-    public function test_agent_chat_advertises_aggregate_risk_summary_as_optional_deterministic_tool(): void
+    public function test_agent_chat_advertises_optional_deterministic_tools(): void
     {
         [$company, $user] = $this->createCompanyUser('Company A');
         Sanctum::actingAs($user);
@@ -278,7 +278,8 @@ class AgentChatControllerTest extends TestCase
             }
 
             $aggregateTool = $tools['aggregate_risk_summary'] ?? null;
-            if (! is_array($aggregateTool)) {
+            $alertTool = $tools['alert_recommendations'] ?? null;
+            if (! is_array($aggregateTool) || ! is_array($alertTool)) {
                 return false;
             }
 
@@ -287,7 +288,13 @@ class AgentChatControllerTest extends TestCase
                 && $aggregateTool['optional'] === true
                 && $aggregateTool['deterministic'] === true
                 && $aggregateTool['score_authority'] === 'laravel'
+                && $alertTool['method'] === 'GET'
+                && $alertTool['path'] === "/api/internal/agent-tools/company/{$company->id}/alert-recommendations"
+                && $alertTool['optional'] === true
+                && $alertTool['deterministic'] === true
+                && $alertTool['recommendation_authority'] === 'laravel'
                 && ! array_key_exists('database_url', $aggregateTool)
+                && ! array_key_exists('database_url', $alertTool)
                 && $policy['database_access'] === 'forbidden'
                 && $policy['autonomous_actions'] === 'forbidden'
                 && $policy['score_recalculation'] === 'forbidden';
