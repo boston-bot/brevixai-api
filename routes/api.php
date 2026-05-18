@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AccountingController;
 use App\Http\Controllers\Api\AlertController;
+use App\Http\Controllers\Api\AlertRecommendationController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
@@ -151,6 +152,13 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Alerts
+    Route::prefix('alert-recommendations')->group(function () {
+        Route::get('/', [AlertRecommendationController::class, 'index']);
+        Route::get('/{id}', [AlertRecommendationController::class, 'show']);
+        Route::post('/{id}/approve', [AlertRecommendationController::class, 'approve']);
+        Route::post('/{id}/dismiss', [AlertRecommendationController::class, 'dismiss']);
+    });
+
     Route::prefix('alerts')->group(function () {
         Route::get('/', [AlertController::class, 'index']);
         Route::get('/rules', [AlertController::class, 'rules']);

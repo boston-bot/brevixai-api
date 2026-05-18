@@ -2,8 +2,18 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AlertRecommendation;
+
 class AlertRecommendationService
 {
+    /** @var array<int, string> */
+    private const MANAGED_ALERT_TYPES = [
+        'critical_aggregate_risk_review',
+        'vendor_risk_review',
+        'reconciliation_risk_review',
+        'entity_relationship_review',
+    ];
+
     private const DOMAIN_VENDOR = 'vendor_risk';
 
     private const DOMAIN_RECONCILIATION = 'reconciliation_risk';
@@ -50,9 +60,11 @@ class AlertRecommendationService
             $recommendations[] = $entityRecommendation;
         }
 
+        $persistedRecommendations = $this->persistRecommendations($companyId, $recommendations);
+
         return [
             'company_id' => $companyId,
-            'recommended_alerts' => $recommendations,
+            'recommended_alerts' => $persistedRecommendations,
         ];
     }
 
@@ -250,6 +262,96 @@ class AlertRecommendationService
             'requires_human_review' => true,
             'can_auto_create' => false,
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $recommendations
+     * @return array<int, array<string, mixed>>
+     */
+    private function persistRecommendations(string $companyId, array $recommendations): array
+    {
+        $persisted = [];
+        $activeKeys = [];
+
+        foreach ($recommendations as $recommendation) {
+            $alertType = (string) ($recommendation['alert_type'] ?? '');
+            $sourceRiskDomain = (string) ($recommendation['source_risk_domain'] ?? '');
+            $activeKeys[] = $this->recommendationKey($alertType, $sourceRiskDomain);
+
+            $record = AlertRecommendation::where('company_id', $companyId)
+                ->where('alert_type', $alertType)
+                ->where('source_risk_domain', $sourceRiskDomain)
+                ->where('status', AlertRecommendation::STATUS_PENDING_REVIEW)
+                ->first();
+
+            if (! $record) {
+                $record = new AlertRecommendation([
+                    'company_id' => $companyId,
+                    'alert_type' => $alertType,
+                    'source_risk_domain' => $sourceRiskDomain,
+                    'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+                ]);
+            }
+
+            $record->fill([
+                'severity' => (string) ($recommendation['severity'] ?? 'medium'),
+                'title' => (string) ($recommendation['title'] ?? 'Review alert recommendation'),
+                'summary' => (string) ($recommendation['summary'] ?? ''),
+                'evidence' => is_array($recommendation['evidence'] ?? null) ? $recommendation['evidence'] : [],
+                'source_rule_ids' => is_array($recommendation['source_rule_ids'] ?? null) ? $recommendation['source_rule_ids'] : [],
+                'confidence_score' => (float) ($recommendation['confidence_score'] ?? 0),
+                'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+            ]);
+            $record->save();
+
+            $persisted[] = $this->recommendationPayload($record);
+        }
+
+        $this->expireStalePendingRecommendations($companyId, $activeKeys);
+
+        return $persisted;
+    }
+
+    /**
+     * @param  array<int, string>  $activeKeys
+     */
+    private function expireStalePendingRecommendations(string $companyId, array $activeKeys): void
+    {
+        AlertRecommendation::where('company_id', $companyId)
+            ->where('status', AlertRecommendation::STATUS_PENDING_REVIEW)
+            ->whereIn('alert_type', self::MANAGED_ALERT_TYPES)
+            ->get()
+            ->each(function (AlertRecommendation $recommendation) use ($activeKeys): void {
+                if (! in_array($this->recommendationKey($recommendation->alert_type, $recommendation->source_risk_domain), $activeKeys, true)) {
+                    $recommendation->update(['status' => AlertRecommendation::STATUS_EXPIRED]);
+                }
+            });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function recommendationPayload(AlertRecommendation $recommendation): array
+    {
+        return [
+            'id' => $recommendation->id,
+            'alert_type' => $recommendation->alert_type,
+            'severity' => $recommendation->severity,
+            'title' => $recommendation->title,
+            'summary' => $recommendation->summary,
+            'evidence' => $recommendation->evidence ?? [],
+            'source_risk_domain' => $recommendation->source_risk_domain,
+            'source_rule_ids' => $recommendation->source_rule_ids ?? [],
+            'confidence_score' => $recommendation->confidence_score,
+            'status' => $recommendation->status,
+            'requires_human_review' => true,
+            'can_auto_create' => false,
+        ];
+    }
+
+    private function recommendationKey(string $alertType, string $sourceRiskDomain): string
+    {
+        return "{$sourceRiskDomain}:{$alertType}";
     }
 
     private function severity(int $score): string

@@ -287,6 +287,8 @@ class AgentChatController extends Controller
         return [
             'database_access' => 'forbidden',
             'autonomous_actions' => 'forbidden',
+            'alert_creation' => 'recommendation_only',
+            'alert_recommendation_approval' => 'authenticated_user_only',
             'score_recalculation' => 'forbidden',
         ];
     }

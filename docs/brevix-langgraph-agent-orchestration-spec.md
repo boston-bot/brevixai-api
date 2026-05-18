@@ -684,36 +684,37 @@ Returns:
 
 ---
 
-### Create Alert
+### Alert Recommendations
+
+Agents and internal services do not create alerts directly.
+
+The internal tool surface may expose deterministic recommendation drafts:
 
 ```http
-POST /api/internal/agent-tools/companies/{companyId}/alerts
+GET /api/internal/agent-tools/company/{companyId}/alert-recommendations
 ```
 
-Payload:
+Laravel stores each draft in `alert_recommendations` with `status = pending_review`.
 
-```json
-{
-  "title": "Possible threshold avoidance pattern",
-  "severity": "medium",
-  "confidence": 0.82,
-  "summary": "Three payments to the same vendor were posted below the approval threshold.",
-  "evidence": [
-    {
-      "type": "transaction",
-      "id": 991
-    }
-  ],
-  "created_by": "agent",
-  "requires_review": true
-}
+Users review recommendations through authenticated user endpoints:
+
+```http
+GET /api/alert-recommendations
+GET /api/alert-recommendations/{id}
+POST /api/alert-recommendations/{id}/approve
+POST /api/alert-recommendations/{id}/dismiss
 ```
+
+Approval is the only path that creates an `alerts` row. The created alert links back through
+`alerts.alert_recommendation_id`. Dismissal records the reviewer and optional note without
+creating an alert.
 
 Important:
 
-Laravel must validate and sanitize this payload.
+Laravel must validate and sanitize recommendation payloads before persistence.
 
-The agent should never bypass Laravel alert creation rules.
+The agent should never bypass Laravel alert creation rules, approve recommendations, or access
+the database directly.
 
 ---
 
@@ -832,6 +833,44 @@ rejected
 expired
 executed
 failed
+```
+
+---
+
+### `alert_recommendations`
+
+Purpose:
+
+Store deterministic alert drafts until a human user approves or dismisses them.
+
+Suggested fields:
+
+```text
+id
+company_id
+source_risk_domain
+alert_type
+severity
+title
+summary
+evidence
+source_rule_ids
+confidence_score
+status
+reviewed_by_user_id
+reviewed_at
+review_note
+created_at
+updated_at
+```
+
+Statuses:
+
+```text
+pending_review
+approved
+dismissed
+expired
 ```
 
 ---
@@ -1367,6 +1406,7 @@ Test that:
 
 Require human approval for:
 
+- creating an alert from an AI-generated recommendation
 - creating a case from AI-generated findings
 - escalating severity to critical
 - sending/exporting reports externally

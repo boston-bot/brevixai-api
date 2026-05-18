@@ -340,6 +340,7 @@ class AggregateRiskSummaryTest extends TestCase
             'agent_steps',
             'agent_runs',
             'alerts',
+            'alert_recommendations',
             'reconciliation_discrepancies',
             'reconciliation_results',
             'transactions',
@@ -371,6 +372,24 @@ class AggregateRiskSummaryTest extends TestCase
             $table->string('role')->default('owner');
             $table->boolean('is_verified')->default(false);
             $table->timestamp('last_login_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('alert_recommendations', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('company_id');
+            $table->text('source_risk_domain');
+            $table->text('alert_type');
+            $table->text('severity');
+            $table->text('title');
+            $table->text('summary');
+            $table->json('evidence');
+            $table->json('source_rule_ids');
+            $table->decimal('confidence_score', 5, 4)->default(0);
+            $table->text('status')->default('pending_review');
+            $table->foreignUuid('reviewed_by_user_id')->nullable();
+            $table->timestamp('reviewed_at')->nullable();
+            $table->text('review_note')->nullable();
             $table->timestamps();
         });
 
