@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
 use App\Services\Agents\AggregateRiskSummaryService;
 use App\Services\Agents\AlertRecommendationService;
+use App\Services\Agents\CaseRecommendationService;
 use App\Services\Agents\EntityRelationshipRiskScoringService;
 use App\Services\Agents\ReconciliationRiskScoringService;
 use App\Services\Agents\VendorRiskScoringService;
@@ -230,6 +231,33 @@ class AgentToolController extends Controller
             return response()->json($result);
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'alert_recommendations', $e);
+        }
+    }
+
+    public function caseRecommendations(
+        Request $request,
+        string $companyId,
+        CaseRecommendationService $caseRecommendationService
+    ): JsonResponse {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            $result = $caseRecommendationService->getCaseRecommendations($companyId);
+
+            return response()->json($result);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'case_recommendations', $e);
         }
     }
 

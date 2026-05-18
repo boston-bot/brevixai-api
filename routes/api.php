@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CaseController;
+use App\Http\Controllers\Api\CaseRecommendationController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\ControlsController;
 use App\Http\Controllers\Api\DashboardController;
@@ -39,6 +40,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/entity-relationship-risk', [AgentToolController::class, 'entityRelationshipRisk']);
         Route::get('/company/{companyId}/aggregate-risk-summary', [AgentToolController::class, 'aggregateRiskSummary']);
         Route::get('/company/{companyId}/alert-recommendations', [AgentToolController::class, 'alertRecommendations']);
+        Route::get('/company/{companyId}/case-recommendations', [AgentToolController::class, 'caseRecommendations']);
     });
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -149,6 +151,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/events', [CaseController::class, 'addEvent']);
         Route::post('/{id}/alerts', [CaseController::class, 'linkAlert']);
         Route::delete('/{id}/alerts/{alertId}', [CaseController::class, 'unlinkAlert']);
+    });
+
+    // Case Recommendations
+    Route::prefix('case-recommendations')->group(function () {
+        Route::get('/', [CaseRecommendationController::class, 'index']);
+        Route::get('/{id}', [CaseRecommendationController::class, 'show']);
+        Route::post('/{id}/approve', [CaseRecommendationController::class, 'approve']);
+        Route::post('/{id}/dismiss', [CaseRecommendationController::class, 'dismiss']);
     });
 
     // Alerts
