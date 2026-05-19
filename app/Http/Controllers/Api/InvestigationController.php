@@ -11,6 +11,7 @@ use App\Services\InvestigationService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Validation\Rule;
 
 class InvestigationController extends Controller
@@ -268,19 +269,41 @@ class InvestigationController extends Controller
 
     /**
      * POST /api/investigations/{id}/reports
+     *
+     * Accepts format=json (default) or format=pdf.
+     * PDF returns a downloadable application/pdf response.
+     * User-triggered only — agents are blocked at the service layer.
      */
-    public function generateReport(Request $request, string $id): JsonResponse
+    public function generateReport(Request $request, string $id): JsonResponse|Response
     {
         $companyId = $request->user()->company_id;
         if (! $companyId) {
             return response()->json(['error' => 'No company associated with account'], 403);
         }
 
-        $request->validate([
-            'format' => ['sometimes', 'string', Rule::in(['json'])],
+        $validated = $request->validate([
+            'format' => ['sometimes', 'string', Rule::in(['json', 'pdf'])],
         ]);
 
+        $format = $validated['format'] ?? 'json';
+
         try {
+            if ($format === 'pdf') {
+                $pdfBytes = $this->reportService->generatePdf(
+                    companyId: $companyId,
+                    caseId: $id,
+                    actorType: InvestigationActivityEvent::ACTOR_USER,
+                    actorId: $request->user()->id,
+                );
+
+                $filename = 'investigation-report-' . $id . '-' . now()->format('Y-m-d') . '.pdf';
+
+                return response($pdfBytes, 200, [
+                    'Content-Type' => 'application/pdf',
+                    'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                ]);
+            }
+
             $result = $this->reportService->generate(
                 companyId: $companyId,
                 caseId: $id,

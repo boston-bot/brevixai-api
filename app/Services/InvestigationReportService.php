@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\InvestigationActivityEvent;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
 
 class InvestigationReportService
@@ -22,7 +23,7 @@ class InvestigationReportService
     ) {}
 
     /**
-     * Generate a structured report payload for an investigation.
+     * Generate a structured JSON report payload for an investigation.
      * Only users (actorType = 'user') may generate reports. Agents are blocked.
      */
     public function generate(
@@ -31,10 +32,54 @@ class InvestigationReportService
         string $actorType,
         string $actorId,
     ): array {
-        if ($actorType === InvestigationActivityEvent::ACTOR_AGENT) {
-            throw new Exception('Agents cannot generate investigation reports', 403);
-        }
+        $this->assertNotAgent($actorType);
 
+        ['sections' => $sections, 'evidenceCount' => $evidenceCount, 'eventCount' => $eventCount]
+            = $this->buildReportSections($companyId, $caseId);
+
+        $this->recordReportActivity($caseId, $companyId, $actorType, $actorId, 'json', $evidenceCount, $eventCount);
+
+        return [
+            'report' => array_merge($sections, [
+                'generated_at' => now()->toIso8601String(),
+                'generated_by_user_id' => $actorId,
+            ]),
+        ];
+    }
+
+    /**
+     * Generate a PDF report for an investigation and return the raw PDF bytes.
+     * Only users (actorType = 'user') may generate reports. Agents are blocked.
+     */
+    public function generatePdf(
+        string $companyId,
+        string $caseId,
+        string $actorType,
+        string $actorId,
+    ): string {
+        $this->assertNotAgent($actorType);
+
+        ['sections' => $sections, 'evidenceCount' => $evidenceCount, 'eventCount' => $eventCount]
+            = $this->buildReportSections($companyId, $caseId);
+
+        $reportPayload = array_merge($sections, [
+            'generated_at' => now()->toIso8601String(),
+            'generated_by_user_id' => $actorId,
+        ]);
+
+        $this->recordReportActivity($caseId, $companyId, $actorType, $actorId, 'pdf', $evidenceCount, $eventCount);
+
+        return Pdf::loadView('reports.investigation-pdf', ['report' => $reportPayload])->output();
+    }
+
+    /**
+     * Build the sanitized report sections shared by both JSON and PDF generation.
+     * Returns the sections array plus counts for activity metadata.
+     *
+     * @return array{sections: array, evidenceCount: int, eventCount: int}
+     */
+    private function buildReportSections(string $companyId, string $caseId): array
+    {
         $detail = $this->investigationService->detail($companyId, $caseId);
         if (! $detail) {
             throw new Exception('Investigation not found', 404);
@@ -61,7 +106,6 @@ class InvestigationReportService
         ];
 
         $riskSummary = $this->buildRiskSummary($recommendation, $linkedAlerts);
-
         $investigativeSynthesis = $this->buildInvestigativeSynthesis($workspace, $recommendation);
 
         $sanitizedEvidenceItems = collect($evidenceItems)->map(function (object $item): array {
@@ -85,25 +129,9 @@ class InvestigationReportService
             ? [['content' => $workspace['investigation_notes'], 'type' => 'investigation_notes']]
             : [];
 
-        $this->investigationService->recordActivity(
-            caseId: $caseId,
-            companyId: $companyId,
-            eventType: InvestigationActivityEvent::EVENT_REPORT_GENERATED,
-            actorType: $actorType,
-            actorId: $actorId,
-            eventSummary: 'Investigation report generated',
-            eventMetadata: [
-                'format' => 'json',
-                'evidence_item_count' => count($sanitizedEvidenceItems),
-                'activity_event_count' => count($timeline),
-            ],
-        );
-
         return [
-            'report' => [
+            'sections' => [
                 'title' => $investigation['title'],
-                'generated_at' => now()->toIso8601String(),
-                'generated_by_user_id' => $actorId,
                 'case_summary' => $caseSummary,
                 'risk_summary' => $riskSummary,
                 'investigative_synthesis' => $investigativeSynthesis,
@@ -112,7 +140,40 @@ class InvestigationReportService
                 'notes' => $notes,
                 'disclaimer' => self::DISCLAIMER,
             ],
+            'evidenceCount' => count($sanitizedEvidenceItems),
+            'eventCount' => count($timeline),
         ];
+    }
+
+    private function recordReportActivity(
+        string $caseId,
+        string $companyId,
+        string $actorType,
+        string $actorId,
+        string $format,
+        int $evidenceCount,
+        int $eventCount,
+    ): void {
+        $this->investigationService->recordActivity(
+            caseId: $caseId,
+            companyId: $companyId,
+            eventType: InvestigationActivityEvent::EVENT_REPORT_GENERATED,
+            actorType: $actorType,
+            actorId: $actorId,
+            eventSummary: 'Investigation report generated',
+            eventMetadata: [
+                'format' => $format,
+                'evidence_item_count' => $evidenceCount,
+                'activity_event_count' => $eventCount,
+            ],
+        );
+    }
+
+    private function assertNotAgent(string $actorType): void
+    {
+        if ($actorType === InvestigationActivityEvent::ACTOR_AGENT) {
+            throw new Exception('Agents cannot generate investigation reports', 403);
+        }
     }
 
     private function buildRiskSummary(?array $recommendation, mixed $linkedAlerts): array

@@ -265,6 +265,191 @@ class InvestigationReportExportTest extends TestCase
         );
     }
 
+    // =========================================================================
+    // PDF export tests (Phase 4.4)
+    // =========================================================================
+
+    // -------------------------------------------------------------------------
+    // Authorized user can generate PDF
+    // -------------------------------------------------------------------------
+
+    public function test_authorized_user_can_generate_pdf(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'pdf'])
+            ->assertOk();
+    }
+
+    // -------------------------------------------------------------------------
+    // Unauthenticated user blocked from PDF
+    // -------------------------------------------------------------------------
+
+    public function test_unauthenticated_user_cannot_generate_pdf(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'pdf'])
+            ->assertUnauthorized();
+    }
+
+    // -------------------------------------------------------------------------
+    // PDF response has correct content type
+    // -------------------------------------------------------------------------
+
+    public function test_pdf_response_has_correct_content_type(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'pdf']);
+
+        $response->assertOk();
+        $this->assertStringContainsString('application/pdf', $response->headers->get('Content-Type'));
+    }
+
+    // -------------------------------------------------------------------------
+    // Disclaimer appears in PDF source payload / HTML template
+    // -------------------------------------------------------------------------
+
+    public function test_pdf_disclaimer_included_in_source(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        // Obtain the report payload (same data the PDF renderer receives).
+        $jsonResponse = $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'json']);
+        $jsonResponse->assertOk();
+        $report = $jsonResponse->json('report');
+
+        // Render the Blade template used by the PDF renderer and assert the disclaimer is present.
+        $html = view('reports.investigation-pdf', ['report' => $report])->render();
+
+        $this->assertStringContainsString(
+            'This report summarizes risk indicators and review activity.',
+            $html,
+        );
+        $this->assertStringContainsString(
+            'It is not a legal conclusion or proof of fraud.',
+            $html,
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Sensitive metadata excluded from PDF source payload
+    // -------------------------------------------------------------------------
+
+    public function test_pdf_excludes_sensitive_metadata_from_source(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $item = new InvestigationEvidenceItem([
+            'audit_case_id' => $case->id,
+            'company_id' => $company->id,
+            'evidence_type' => InvestigationEvidenceItem::TYPE_TRANSACTION,
+            'title' => 'Payment item for PDF test',
+            'summary' => 'Contains sensitive metadata fields.',
+            'source' => 'manual',
+            'added_by_actor_type' => InvestigationEvidenceItem::ACTOR_USER,
+            'added_by_actor_id' => $user->id,
+            'metadata' => [
+                'visible_label' => 'keep-this',
+                'raw_payload' => 'must-be-stripped',
+                'transaction_details' => ['account' => 'secret-account'],
+                'evidence' => ['domain' => 'also-stripped'],
+            ],
+        ]);
+        $item->id = (string) Str::uuid();
+        $item->save();
+
+        Sanctum::actingAs($user);
+
+        // The PDF is built from the same sanitized payload as the JSON report.
+        // Verify the payload preserves safe metadata keys and strips sensitive ones.
+        $jsonResponse = $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'json']);
+        $jsonResponse->assertOk();
+
+        $evidenceItems = $jsonResponse->json('report.evidence_items');
+        $this->assertCount(1, $evidenceItems);
+        $metadata = $evidenceItems[0]['metadata'];
+
+        $this->assertArrayHasKey('visible_label', $metadata);
+        $this->assertEquals('keep-this', $metadata['visible_label']);
+        $this->assertArrayNotHasKey('raw_payload', $metadata);
+        $this->assertArrayNotHasKey('transaction_details', $metadata);
+        $this->assertArrayNotHasKey('evidence', $metadata);
+
+        // Additionally verify the rendered HTML template does not expose sensitive strings.
+        $report = $jsonResponse->json('report');
+        $html = view('reports.investigation-pdf', ['report' => $report])->render();
+
+        $this->assertStringNotContainsString('must-be-stripped', $html);
+        $this->assertStringNotContainsString('secret-account', $html);
+        $this->assertStringNotContainsString('also-stripped', $html);
+    }
+
+    // -------------------------------------------------------------------------
+    // Activity event recorded on PDF generation (format=pdf)
+    // -------------------------------------------------------------------------
+
+    public function test_pdf_activity_event_recorded(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'pdf'])->assertOk();
+
+        $this->assertDatabaseHas('investigation_activity_events', [
+            'audit_case_id' => $case->id,
+            'event_type' => InvestigationActivityEvent::EVENT_REPORT_GENERATED,
+            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
+            'actor_id' => $user->id,
+        ]);
+
+        // Verify the activity event carries format=pdf in its metadata.
+        $event = InvestigationActivityEvent::where('audit_case_id', $case->id)
+            ->where('event_type', InvestigationActivityEvent::EVENT_REPORT_GENERATED)
+            ->latest('created_at')
+            ->first();
+
+        $this->assertNotNull($event);
+        $this->assertEquals('pdf', $event->event_metadata['format'] ?? null);
+    }
+
+    // -------------------------------------------------------------------------
+    // Agents cannot generate PDF reports via service
+    // -------------------------------------------------------------------------
+
+    public function test_agent_cannot_generate_pdf_report_via_service(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $service = app(InvestigationReportService::class);
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionCode(403);
+        $this->expectExceptionMessage('Agents cannot generate investigation reports');
+
+        $service->generatePdf(
+            companyId: $company->id,
+            caseId: $case->id,
+            actorType: InvestigationActivityEvent::ACTOR_AGENT,
+            actorId: (string) Str::uuid(),
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
