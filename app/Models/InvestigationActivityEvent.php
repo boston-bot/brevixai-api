@@ -26,6 +26,8 @@ class InvestigationActivityEvent extends Model
 
     public const EVENT_EVIDENCE_LINKED = 'evidence_linked';
 
+    public const EVENT_EVIDENCE_REMOVED = 'evidence_removed';
+
     public const EVENT_RECOMMENDATION_APPROVED = 'recommendation_approved';
 
     protected $keyType = 'string';

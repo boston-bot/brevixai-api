@@ -6,7 +6,9 @@ use App\Models\AuditCase;
 use App\Models\CaseRecommendation;
 use App\Models\Company;
 use App\Models\InvestigationActivityEvent;
+use App\Models\InvestigationEvidenceItem;
 use App\Models\User;
+use App\Services\InvestigationEvidenceService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -14,7 +16,7 @@ use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
-class InvestigationWorkspaceTest extends TestCase
+class InvestigationEvidenceLedgerTest extends TestCase
 {
     protected function setUp(): void
     {
@@ -24,112 +26,35 @@ class InvestigationWorkspaceTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // List
+    // List evidence
     // -------------------------------------------------------------------------
 
-    public function test_list_returns_investigations_for_own_company(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $this->createCase($company->id, $user->id);
-        $this->createCase($company->id, $user->id, ['investigation_priority' => 'critical']);
-
-        [$otherCompany, $otherUser] = $this->createCompanyUser();
-        $this->createCase($otherCompany->id, $otherUser->id);
-
-        Sanctum::actingAs($user);
-
-        $response = $this->getJson('/api/investigations');
-
-        $response->assertOk()
-            ->assertJsonCount(2, 'investigations')
-            ->assertJsonPath('total', 2);
-    }
-
-    public function test_list_filters_by_investigation_status(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $this->createCase($company->id, $user->id, ['investigation_status' => 'open']);
-        $this->createCase($company->id, $user->id, ['investigation_status' => 'in_review']);
-
-        Sanctum::actingAs($user);
-
-        $this->getJson('/api/investigations?investigation_status=open')
-            ->assertOk()
-            ->assertJsonCount(1, 'investigations')
-            ->assertJsonPath('investigations.0.investigation_status', 'open');
-
-        $this->getJson('/api/investigations?investigation_status=in_review')
-            ->assertOk()
-            ->assertJsonCount(1, 'investigations');
-    }
-
-    public function test_list_filters_by_priority(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $this->createCase($company->id, $user->id, ['investigation_priority' => 'critical']);
-        $this->createCase($company->id, $user->id, ['investigation_priority' => 'low']);
-
-        Sanctum::actingAs($user);
-
-        $this->getJson('/api/investigations?investigation_priority=critical')
-            ->assertOk()
-            ->assertJsonCount(1, 'investigations')
-            ->assertJsonPath('investigations.0.investigation_priority', 'critical');
-    }
-
-    public function test_list_requires_authentication(): void
-    {
-        $this->getJson('/api/investigations')->assertUnauthorized();
-    }
-
-    // -------------------------------------------------------------------------
-    // Detail
-    // -------------------------------------------------------------------------
-
-    public function test_show_returns_full_investigation_detail(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $recommendation = $this->createCaseRecommendation($company->id);
-        $case = $this->createCase($company->id, $user->id, [
-            'case_recommendation_id' => $recommendation->id,
-            'investigation_status' => 'in_review',
-            'investigation_priority' => 'high',
-            'investigation_summary' => 'Elevated vendor risk patterns require review.',
-        ]);
-
-        Sanctum::actingAs($user);
-
-        $response = $this->getJson("/api/investigations/{$case->id}");
-
-        $response->assertOk()
-            ->assertJsonPath('investigation.id', $case->id)
-            ->assertJsonPath('investigation.title', $case->title)
-            ->assertJsonPath('workspace.investigation_status', 'in_review')
-            ->assertJsonPath('workspace.investigation_priority', 'high')
-            ->assertJsonPath('workspace.investigation_summary', 'Elevated vendor risk patterns require review.')
-            ->assertJsonPath('recommendation.id', $recommendation->id)
-            ->assertJsonPath('recommendation.case_type', $recommendation->case_type);
-    }
-
-    public function test_show_returns_activity_timeline(): void
+    public function test_list_evidence_returns_items_for_own_investigation(): void
     {
         [$company, $user] = $this->createCompanyUser();
         $case = $this->createCase($company->id, $user->id);
 
-        $this->createActivityEvent($case->id, $company->id, InvestigationActivityEvent::EVENT_CASE_CREATED, InvestigationActivityEvent::ACTOR_USER, $user->id, 'Case opened');
-        $this->createActivityEvent($case->id, $company->id, InvestigationActivityEvent::EVENT_STATUS_CHANGED, InvestigationActivityEvent::ACTOR_USER, $user->id, 'Status changed');
+        $this->createEvidenceItem($case->id, $company->id, [
+            'evidence_type' => InvestigationEvidenceItem::TYPE_TRANSACTION,
+            'title' => 'Suspicious payment',
+        ]);
+        $this->createEvidenceItem($case->id, $company->id, [
+            'evidence_type' => InvestigationEvidenceItem::TYPE_VENDOR,
+            'title' => 'Shell vendor profile',
+        ]);
 
         Sanctum::actingAs($user);
 
-        $response = $this->getJson("/api/investigations/{$case->id}");
+        $response = $this->getJson("/api/investigations/{$case->id}/evidence");
 
         $response->assertOk()
-            ->assertJsonCount(2, 'activity_timeline')
-            ->assertJsonPath('activity_timeline.0.event_type', InvestigationActivityEvent::EVENT_CASE_CREATED)
-            ->assertJsonPath('activity_timeline.1.event_type', InvestigationActivityEvent::EVENT_STATUS_CHANGED);
+            ->assertJsonCount(2, 'evidence_items')
+            ->assertJsonPath('total', 2)
+            ->assertJsonPath('evidence_items.0.evidence_type', InvestigationEvidenceItem::TYPE_TRANSACTION)
+            ->assertJsonPath('evidence_items.1.evidence_type', InvestigationEvidenceItem::TYPE_VENDOR);
     }
 
-    public function test_show_returns_404_for_other_company(): void
+    public function test_list_evidence_returns_404_for_other_company(): void
     {
         [$company, $user] = $this->createCompanyUser();
         [$otherCompany, $otherUser] = $this->createCompanyUser();
@@ -137,10 +62,331 @@ class InvestigationWorkspaceTest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $this->getJson("/api/investigations/{$case->id}")->assertNotFound();
+        $this->getJson("/api/investigations/{$case->id}/evidence")->assertNotFound();
     }
 
-    public function test_show_returns_null_recommendation_when_none_linked(): void
+    public function test_list_evidence_returns_empty_for_new_investigation(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson("/api/investigations/{$case->id}/evidence")
+            ->assertOk()
+            ->assertJsonCount(0, 'evidence_items')
+            ->assertJsonPath('total', 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Add transaction evidence
+    // -------------------------------------------------------------------------
+
+    public function test_add_transaction_evidence(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $transactionId = (string) Str::uuid();
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'transaction',
+            'evidence_reference_id' => $transactionId,
+            'title' => 'Split payment #4821',
+            'summary' => 'Payment split into three transactions just below approval threshold.',
+            'source' => 'transaction:review',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('evidence_item.evidence_type', 'transaction')
+            ->assertJsonPath('evidence_item.evidence_reference_id', $transactionId)
+            ->assertJsonPath('evidence_item.title', 'Split payment #4821')
+            ->assertJsonPath('evidence_item.added_by_actor_type', InvestigationEvidenceItem::ACTOR_USER)
+            ->assertJsonPath('evidence_item.added_by_actor_id', $user->id);
+
+        $this->assertDatabaseHas('investigation_evidence_items', [
+            'audit_case_id' => $case->id,
+            'company_id' => $company->id,
+            'evidence_type' => 'transaction',
+            'evidence_reference_id' => $transactionId,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Add vendor evidence
+    // -------------------------------------------------------------------------
+
+    public function test_add_vendor_evidence(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $vendorId = (string) Str::uuid();
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'vendor',
+            'evidence_reference_id' => $vendorId,
+            'title' => 'Shell entity: Apex Consulting LLC',
+            'summary' => 'No web presence, registered address is a PO box, no employees found.',
+            'source' => 'vendor:risk_profile',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('evidence_item.evidence_type', 'vendor')
+            ->assertJsonPath('evidence_item.evidence_reference_id', $vendorId);
+
+        $this->assertDatabaseHas('investigation_evidence_items', [
+            'audit_case_id' => $case->id,
+            'evidence_type' => 'vendor',
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Add alert evidence
+    // -------------------------------------------------------------------------
+
+    public function test_add_alert_evidence(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $alertId = (string) Str::uuid();
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'alert',
+            'evidence_reference_id' => $alertId,
+            'title' => 'High-severity duplicate payment alert',
+            'summary' => 'Alert fired for duplicate invoice #INV-9942 paid twice in 30 days.',
+            'source' => 'alert:duplicate_payment_rule',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('evidence_item.evidence_type', 'alert')
+            ->assertJsonPath('evidence_item.evidence_reference_id', $alertId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Reject cross-company evidence
+    // -------------------------------------------------------------------------
+
+    public function test_add_evidence_rejected_for_other_company_investigation(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        [$otherCompany, $otherUser] = $this->createCompanyUser();
+        $case = $this->createCase($otherCompany->id, $otherUser->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'note',
+            'title' => 'Cross-company attempt',
+            'summary' => 'Should not be allowed.',
+            'source' => 'manual',
+        ])->assertNotFound();
+
+        $this->assertDatabaseMissing('investigation_evidence_items', [
+            'audit_case_id' => $case->id,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Delete evidence
+    // -------------------------------------------------------------------------
+
+    public function test_delete_evidence_removes_item(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $item = $this->createEvidenceItem($case->id, $company->id);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/investigations/{$case->id}/evidence/{$item->id}")
+            ->assertOk()
+            ->assertJsonPath('deleted', true);
+
+        $this->assertDatabaseMissing('investigation_evidence_items', [
+            'id' => $item->id,
+        ]);
+    }
+
+    public function test_delete_evidence_rejected_for_other_company(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        [$otherCompany, $otherUser] = $this->createCompanyUser();
+        $case = $this->createCase($otherCompany->id, $otherUser->id);
+        $item = $this->createEvidenceItem($case->id, $otherCompany->id);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/investigations/{$case->id}/evidence/{$item->id}")
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('investigation_evidence_items', [
+            'id' => $item->id,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Agent cannot add evidence
+    // -------------------------------------------------------------------------
+
+    public function test_agent_cannot_add_evidence_via_service(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $service = app(InvestigationEvidenceService::class);
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionCode(403);
+        $this->expectExceptionMessage('Agents cannot add evidence items');
+
+        $service->add(
+            companyId: $company->id,
+            actorType: InvestigationEvidenceItem::ACTOR_AGENT,
+            actorId: null,
+            caseId: $case->id,
+            data: [
+                'evidence_type' => InvestigationEvidenceItem::TYPE_NOTE,
+                'title' => 'Agent attempt',
+                'summary' => 'Should be blocked.',
+                'source' => 'agent:chat',
+            ],
+        );
+    }
+
+    public function test_agent_cannot_remove_evidence_via_service(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $item = $this->createEvidenceItem($case->id, $company->id);
+
+        $service = app(InvestigationEvidenceService::class);
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionCode(403);
+        $this->expectExceptionMessage('Agents cannot remove evidence items');
+
+        $service->remove(
+            companyId: $company->id,
+            actorType: InvestigationEvidenceItem::ACTOR_AGENT,
+            actorId: null,
+            caseId: $case->id,
+            evidenceItemId: $item->id,
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Metadata sanitized
+    // -------------------------------------------------------------------------
+
+    public function test_metadata_sanitized_on_add(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'transaction',
+            'title' => 'Test with sensitive metadata',
+            'summary' => 'Metadata should be sanitized.',
+            'source' => 'manual',
+            'metadata' => [
+                'safe_field' => 'visible',
+                'raw_payload' => 'should-be-stripped',
+                'transaction_details' => ['account' => 'secret'],
+                'evidence' => ['raw_data' => 'also-stripped'],
+                'risk_score' => 85,
+            ],
+        ])->assertCreated();
+
+        $item = InvestigationEvidenceItem::where('audit_case_id', $case->id)->first();
+        $metadata = $item->metadata;
+
+        $this->assertArrayHasKey('safe_field', $metadata);
+        $this->assertArrayHasKey('risk_score', $metadata);
+        $this->assertArrayNotHasKey('raw_payload', $metadata);
+        $this->assertArrayNotHasKey('transaction_details', $metadata);
+        $this->assertArrayNotHasKey('evidence', $metadata);
+        $this->assertStringNotContainsString('should-be-stripped', json_encode($metadata));
+        $this->assertStringNotContainsString('secret', json_encode($metadata));
+    }
+
+    // -------------------------------------------------------------------------
+    // Activity event recorded
+    // -------------------------------------------------------------------------
+
+    public function test_activity_event_recorded_on_add(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'note',
+            'title' => 'Investigator field note',
+            'summary' => 'Observed irregular approval pattern.',
+            'source' => 'manual',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('investigation_activity_events', [
+            'audit_case_id' => $case->id,
+            'event_type' => InvestigationActivityEvent::EVENT_EVIDENCE_LINKED,
+            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
+            'actor_id' => $user->id,
+        ]);
+    }
+
+    public function test_activity_event_recorded_on_remove(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $item = $this->createEvidenceItem($case->id, $company->id);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/investigations/{$case->id}/evidence/{$item->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('investigation_activity_events', [
+            'audit_case_id' => $case->id,
+            'event_type' => InvestigationActivityEvent::EVENT_EVIDENCE_REMOVED,
+            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
+            'actor_id' => $user->id,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Investigation detail includes evidence_items
+    // -------------------------------------------------------------------------
+
+    public function test_investigation_detail_includes_evidence_items(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->createEvidenceItem($case->id, $company->id, [
+            'evidence_type' => InvestigationEvidenceItem::TYPE_TRANSACTION,
+            'title' => 'Key transaction',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/investigations/{$case->id}");
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'evidence_items')
+            ->assertJsonPath('evidence_items.0.evidence_type', InvestigationEvidenceItem::TYPE_TRANSACTION)
+            ->assertJsonPath('evidence_items.0.title', 'Key transaction');
+    }
+
+    public function test_investigation_detail_includes_empty_evidence_items_when_none(): void
     {
         [$company, $user] = $this->createCompanyUser();
         $case = $this->createCase($company->id, $user->id);
@@ -149,253 +395,14 @@ class InvestigationWorkspaceTest extends TestCase
 
         $this->getJson("/api/investigations/{$case->id}")
             ->assertOk()
-            ->assertJsonPath('recommendation', null);
+            ->assertJsonCount(0, 'evidence_items');
     }
 
     // -------------------------------------------------------------------------
-    // Assign
+    // System adds evidence on recommendation approval
     // -------------------------------------------------------------------------
 
-    public function test_assign_updates_investigation_assignee(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $response = $this->postJson("/api/investigations/{$case->id}/assign", [
-            'assignee_id' => $user->id,
-        ]);
-
-        $response->assertOk();
-
-        $this->assertDatabaseHas('audit_cases', [
-            'id' => $case->id,
-            'investigation_assigned_user_id' => $user->id,
-        ]);
-    }
-
-    public function test_assign_records_activity_event(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/assign", [
-            'assignee_id' => $user->id,
-        ])->assertOk();
-
-        $this->assertDatabaseHas('investigation_activity_events', [
-            'audit_case_id' => $case->id,
-            'event_type' => InvestigationActivityEvent::EVENT_ASSIGNED,
-            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
-            'actor_id' => $user->id,
-        ]);
-    }
-
-    public function test_assign_updates_last_activity_at(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        $this->assertNull($case->last_activity_at);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/assign", [
-            'assignee_id' => $user->id,
-        ])->assertOk();
-
-        $this->assertNotNull($case->fresh()->last_activity_at);
-    }
-
-    public function test_assign_rejects_user_from_other_company(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        [$otherCompany, $otherUser] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/assign", [
-            'assignee_id' => $otherUser->id,
-        ])->assertStatus(422);
-    }
-
-    public function test_assign_blocked_for_other_company_case(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        [$otherCompany, $otherUser] = $this->createCompanyUser();
-        $case = $this->createCase($otherCompany->id, $otherUser->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/assign", [
-            'assignee_id' => $user->id,
-        ])->assertNotFound();
-    }
-
-    // -------------------------------------------------------------------------
-    // Status
-    // -------------------------------------------------------------------------
-
-    public function test_status_update_changes_investigation_status(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id, ['investigation_status' => 'open']);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/status", [
-            'investigation_status' => 'in_review',
-        ])->assertOk();
-
-        $this->assertDatabaseHas('audit_cases', [
-            'id' => $case->id,
-            'investigation_status' => 'in_review',
-        ]);
-    }
-
-    public function test_status_update_records_activity_event(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/status", [
-            'investigation_status' => 'escalated',
-        ])->assertOk();
-
-        $this->assertDatabaseHas('investigation_activity_events', [
-            'audit_case_id' => $case->id,
-            'event_type' => InvestigationActivityEvent::EVENT_STATUS_CHANGED,
-            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
-        ]);
-    }
-
-    public function test_status_update_rejects_invalid_status(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/status", [
-            'investigation_status' => 'invalid_status',
-        ])->assertUnprocessable();
-    }
-
-    public function test_status_update_blocked_for_other_company(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        [$otherCompany, $otherUser] = $this->createCompanyUser();
-        $case = $this->createCase($otherCompany->id, $otherUser->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/status", [
-            'investigation_status' => 'resolved',
-        ])->assertNotFound();
-    }
-
-    // -------------------------------------------------------------------------
-    // Notes
-    // -------------------------------------------------------------------------
-
-    public function test_notes_adds_investigation_notes(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/notes", [
-            'notes' => 'Vendor payments show a clear pattern of splitting.',
-        ])->assertOk();
-
-        $this->assertDatabaseHas('audit_cases', [
-            'id' => $case->id,
-            'investigation_notes' => 'Vendor payments show a clear pattern of splitting.',
-        ]);
-    }
-
-    public function test_notes_records_activity_event(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/notes", [
-            'notes' => 'Initial investigation notes.',
-        ])->assertOk();
-
-        $this->assertDatabaseHas('investigation_activity_events', [
-            'audit_case_id' => $case->id,
-            'event_type' => InvestigationActivityEvent::EVENT_NOTES_ADDED,
-            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
-        ]);
-    }
-
-    public function test_notes_blocked_for_other_company(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        [$otherCompany, $otherUser] = $this->createCompanyUser();
-        $case = $this->createCase($otherCompany->id, $otherUser->id);
-
-        Sanctum::actingAs($user);
-
-        $this->postJson("/api/investigations/{$case->id}/notes", [
-            'notes' => 'Unauthorized notes attempt.',
-        ])->assertNotFound();
-
-        $this->assertDatabaseMissing('investigation_activity_events', [
-            'audit_case_id' => $case->id,
-            'event_type' => InvestigationActivityEvent::EVENT_NOTES_ADDED,
-        ]);
-    }
-
-    // -------------------------------------------------------------------------
-    // Activity events
-    // -------------------------------------------------------------------------
-
-    public function test_activity_event_metadata_excludes_sensitive_keys(): void
-    {
-        [$company, $user] = $this->createCompanyUser();
-        $case = $this->createCase($company->id, $user->id);
-
-        Sanctum::actingAs($user);
-
-        $investigationService = app(\App\Services\InvestigationService::class);
-        $investigationService->recordActivity(
-            caseId: $case->id,
-            companyId: $company->id,
-            eventType: InvestigationActivityEvent::EVENT_STATUS_CHANGED,
-            actorType: InvestigationActivityEvent::ACTOR_SYSTEM,
-            actorId: null,
-            eventSummary: 'System status update',
-            eventMetadata: [
-                'new_status' => 'in_review',
-                'evidence' => ['secret_transaction' => 'do-not-log'],
-                'supporting_evidence' => ['raw_data' => 'also-hidden'],
-                'safe_field' => 'visible',
-            ],
-        );
-
-        $event = \App\Models\InvestigationActivityEvent::where('audit_case_id', $case->id)->first();
-        $metadata = $event->event_metadata;
-
-        $this->assertArrayHasKey('safe_field', $metadata);
-        $this->assertArrayHasKey('new_status', $metadata);
-        $this->assertArrayNotHasKey('evidence', $metadata);
-        $this->assertArrayNotHasKey('supporting_evidence', $metadata);
-        $this->assertStringNotContainsString('do-not-log', json_encode($metadata));
-        $this->assertStringNotContainsString('also-hidden', json_encode($metadata));
-    }
-
-    public function test_case_creation_from_recommendation_records_investigation_activity(): void
+    public function test_recommendation_approval_auto_adds_evidence_item(): void
     {
         [$company, $user] = $this->createCompanyUser();
         $recommendation = $this->createCaseRecommendation($company->id);
@@ -408,12 +415,32 @@ class InvestigationWorkspaceTest extends TestCase
         $case = AuditCase::where('company_id', $company->id)->first();
         $this->assertNotNull($case);
 
-        $this->assertDatabaseHas('investigation_activity_events', [
+        $this->assertDatabaseHas('investigation_evidence_items', [
             'audit_case_id' => $case->id,
-            'event_type' => InvestigationActivityEvent::EVENT_CASE_CREATED,
-            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
-            'actor_id' => $user->id,
+            'company_id' => $company->id,
+            'evidence_type' => InvestigationEvidenceItem::TYPE_RECOMMENDATION,
+            'evidence_reference_id' => $recommendation->id,
+            'added_by_actor_type' => InvestigationEvidenceItem::ACTOR_SYSTEM,
         ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Validation
+    // -------------------------------------------------------------------------
+
+    public function test_add_evidence_rejects_invalid_evidence_type(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'invalid_type',
+            'title' => 'Test',
+            'summary' => 'Test summary.',
+            'source' => 'manual',
+        ])->assertUnprocessable();
     }
 
     // -------------------------------------------------------------------------
@@ -467,6 +494,26 @@ class InvestigationWorkspaceTest extends TestCase
     /**
      * @param  array<string, mixed>  $overrides
      */
+    private function createEvidenceItem(string $caseId, string $companyId, array $overrides = []): InvestigationEvidenceItem
+    {
+        $item = new InvestigationEvidenceItem(array_merge([
+            'audit_case_id' => $caseId,
+            'company_id' => $companyId,
+            'evidence_type' => InvestigationEvidenceItem::TYPE_NOTE,
+            'title' => 'Test evidence item',
+            'summary' => 'A test evidence entry.',
+            'source' => 'manual',
+            'added_by_actor_type' => InvestigationEvidenceItem::ACTOR_USER,
+        ], $overrides));
+        $item->id = (string) Str::uuid();
+        $item->save();
+
+        return $item;
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
     private function createCaseRecommendation(string $companyId, array $overrides = []): CaseRecommendation
     {
         return CaseRecommendation::create(array_merge([
@@ -481,24 +528,6 @@ class InvestigationWorkspaceTest extends TestCase
             'confidence_score' => 0.9,
             'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
         ], $overrides));
-    }
-
-    private function createActivityEvent(
-        string $caseId,
-        string $companyId,
-        string $eventType,
-        string $actorType,
-        ?string $actorId,
-        string $summary,
-    ): InvestigationActivityEvent {
-        return InvestigationActivityEvent::create([
-            'audit_case_id' => $caseId,
-            'company_id' => $companyId,
-            'event_type' => $eventType,
-            'actor_type' => $actorType,
-            'actor_id' => $actorId,
-            'event_summary' => $summary,
-        ]);
     }
 
     private function createSchema(): void

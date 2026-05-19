@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\InvestigationEvidenceItem;
+use App\Services\InvestigationEvidenceService;
 use App\Services\InvestigationService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +15,7 @@ class InvestigationController extends Controller
 {
     public function __construct(
         private readonly InvestigationService $investigationService,
+        private readonly InvestigationEvidenceService $evidenceService,
     ) {}
 
     /**
@@ -155,5 +158,108 @@ class InvestigationController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    /**
+     * GET /api/investigations/{id}/evidence
+     */
+    public function listEvidence(Request $request, string $id): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        try {
+            $result = $this->evidenceService->list($companyId, $id);
+        } catch (Exception $e) {
+            $status = match ($e->getCode()) {
+                404 => 404,
+                default => 500,
+            };
+
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * POST /api/investigations/{id}/evidence
+     */
+    public function addEvidence(Request $request, string $id): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        $validated = $request->validate([
+            'evidence_type' => ['required', 'string', Rule::in([
+                InvestigationEvidenceItem::TYPE_TRANSACTION,
+                InvestigationEvidenceItem::TYPE_VENDOR,
+                InvestigationEvidenceItem::TYPE_ALERT,
+                InvestigationEvidenceItem::TYPE_RECOMMENDATION,
+                InvestigationEvidenceItem::TYPE_NOTE,
+                InvestigationEvidenceItem::TYPE_DOCUMENT,
+                InvestigationEvidenceItem::TYPE_SYSTEM_FINDING,
+            ])],
+            'evidence_reference_id' => ['sometimes', 'nullable', 'uuid'],
+            'title' => ['required', 'string', 'max:500'],
+            'summary' => ['required', 'string', 'max:5000'],
+            'source' => ['required', 'string', 'max:500'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]);
+
+        try {
+            $result = $this->evidenceService->add(
+                companyId: $companyId,
+                actorType: InvestigationEvidenceItem::ACTOR_USER,
+                actorId: $request->user()->id,
+                caseId: $id,
+                data: $validated,
+            );
+        } catch (Exception $e) {
+            $status = match ($e->getCode()) {
+                404 => 404,
+                403 => 403,
+                default => 500,
+            };
+
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        return response()->json($result, 201);
+    }
+
+    /**
+     * DELETE /api/investigations/{id}/evidence/{evidenceItemId}
+     */
+    public function removeEvidence(Request $request, string $id, string $evidenceItemId): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        try {
+            $this->evidenceService->remove(
+                companyId: $companyId,
+                actorType: InvestigationEvidenceItem::ACTOR_USER,
+                actorId: $request->user()->id,
+                caseId: $id,
+                evidenceItemId: $evidenceItemId,
+            );
+        } catch (Exception $e) {
+            $status = match ($e->getCode()) {
+                404 => 404,
+                403 => 403,
+                default => 500,
+            };
+
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        return response()->json(['deleted' => true]);
     }
 }

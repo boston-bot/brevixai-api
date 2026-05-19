@@ -161,6 +161,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/assign', [InvestigationController::class, 'assign']);
         Route::post('/{id}/status', [InvestigationController::class, 'status']);
         Route::post('/{id}/notes', [InvestigationController::class, 'notes']);
+        Route::get('/{id}/evidence', [InvestigationController::class, 'listEvidence']);
+        Route::post('/{id}/evidence', [InvestigationController::class, 'addEvidence']);
+        Route::delete('/{id}/evidence/{evidenceItemId}', [InvestigationController::class, 'removeEvidence']);
     });
 
     // Case Recommendations

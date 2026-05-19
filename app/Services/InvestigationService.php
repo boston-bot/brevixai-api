@@ -160,6 +160,31 @@ class InvestigationService
                 ->get();
         }
 
+        $evidenceItems = DB::table('investigation_evidence_items')
+            ->where('audit_case_id', $caseId)
+            ->where('company_id', $companyId)
+            ->select(
+                'id',
+                'evidence_type',
+                'evidence_reference_id',
+                'title',
+                'summary',
+                'source',
+                'added_by_actor_type',
+                'added_by_actor_id',
+                'metadata',
+                'created_at',
+            )
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(function (object $item): object {
+                $item->metadata = $item->metadata
+                    ? json_decode($item->metadata, true)
+                    : null;
+
+                return $item;
+            });
+
         $evidenceSummary = null;
         if ($case->case_recommendation_id) {
             $evidenceSummary = $this->buildEvidenceSummary(
@@ -220,6 +245,7 @@ class InvestigationService
             'recommendation' => $recommendation,
             'linked_alerts' => $linkedAlerts,
             'evidence_summary' => $evidenceSummary,
+            'evidence_items' => $evidenceItems,
             'activity_timeline' => $activity,
         ];
     }

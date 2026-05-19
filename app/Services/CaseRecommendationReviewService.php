@@ -7,8 +7,10 @@ use App\Models\AuditCase;
 use App\Models\AuditCaseEvent;
 use App\Models\CaseRecommendation;
 use App\Models\InvestigationActivityEvent;
+use App\Models\InvestigationEvidenceItem;
 use App\Models\RecommendationReviewEvent;
 use App\Services\Agents\CaseRecommendationService;
+use App\Services\InvestigationEvidenceService;
 use App\Services\InvestigationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -19,6 +21,7 @@ class CaseRecommendationReviewService
         private readonly CaseRecommendationService $caseRecommendationService,
         private readonly RecommendationReviewAuditService $reviewAuditService,
         private readonly InvestigationService $investigationService,
+        private readonly InvestigationEvidenceService $evidenceService,
     ) {}
 
     /**
@@ -70,6 +73,27 @@ class CaseRecommendationReviewService
                         'case_type' => $recommendation->case_type,
                         'source_risk_domains' => $recommendation->source_risk_domains ?? [],
                         'confidence_score' => $recommendation->confidence_score,
+                    ],
+                );
+            }
+
+            if (Schema::hasTable('investigation_evidence_items')) {
+                $this->evidenceService->add(
+                    companyId: $companyId,
+                    actorType: InvestigationEvidenceItem::ACTOR_SYSTEM,
+                    actorId: null,
+                    caseId: $case->id,
+                    data: [
+                        'evidence_type' => InvestigationEvidenceItem::TYPE_RECOMMENDATION,
+                        'evidence_reference_id' => $recommendation->id,
+                        'title' => "Case recommendation: {$recommendation->title}",
+                        'summary' => $recommendation->summary,
+                        'source' => 'system:case_recommendation_approval',
+                        'metadata' => [
+                            'case_type' => $recommendation->case_type,
+                            'confidence_score' => $recommendation->confidence_score,
+                            'source_risk_domains' => $recommendation->source_risk_domains ?? [],
+                        ],
                     ],
                 );
             }
