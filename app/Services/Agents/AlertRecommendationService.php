@@ -3,6 +3,8 @@
 namespace App\Services\Agents;
 
 use App\Models\AlertRecommendation;
+use App\Models\RecommendationReviewEvent;
+use App\Services\RecommendationReviewAuditService;
 
 class AlertRecommendationService
 {
@@ -25,6 +27,7 @@ class AlertRecommendationService
         private readonly VendorRiskScoringService $vendorRiskScoringService,
         private readonly ReconciliationRiskScoringService $reconciliationRiskScoringService,
         private readonly EntityRelationshipRiskScoringService $entityRelationshipRiskScoringService,
+        private readonly RecommendationReviewAuditService $reviewAuditService,
     ) {}
 
     /**
@@ -293,6 +296,8 @@ class AlertRecommendationService
                 ]);
             }
 
+            $isNewRecommendation = ! $record->exists;
+
             $record->fill([
                 'severity' => (string) ($recommendation['severity'] ?? 'medium'),
                 'title' => (string) ($recommendation['title'] ?? 'Review alert recommendation'),
@@ -303,6 +308,23 @@ class AlertRecommendationService
                 'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
             ]);
             $record->save();
+
+            if ($isNewRecommendation) {
+                $this->reviewAuditService->record(
+                    companyId: $companyId,
+                    recommendationType: RecommendationReviewEvent::TYPE_ALERT,
+                    recommendationId: $record->id,
+                    eventType: RecommendationReviewEvent::EVENT_CREATED,
+                    actorType: RecommendationReviewEvent::ACTOR_SYSTEM,
+                    metadata: [
+                        'alert_type' => $record->alert_type,
+                        'severity' => $record->severity,
+                        'source_risk_domain' => $record->source_risk_domain,
+                        'source_rule_ids' => $record->source_rule_ids ?? [],
+                        'confidence_score' => $record->confidence_score,
+                    ],
+                );
+            }
 
             $persisted[] = $this->recommendationPayload($record);
         }
@@ -324,6 +346,18 @@ class AlertRecommendationService
             ->each(function (AlertRecommendation $recommendation) use ($activeKeys): void {
                 if (! in_array($this->recommendationKey($recommendation->alert_type, $recommendation->source_risk_domain), $activeKeys, true)) {
                     $recommendation->update(['status' => AlertRecommendation::STATUS_EXPIRED]);
+
+                    $this->reviewAuditService->record(
+                        companyId: $recommendation->company_id,
+                        recommendationType: RecommendationReviewEvent::TYPE_ALERT,
+                        recommendationId: $recommendation->id,
+                        eventType: RecommendationReviewEvent::EVENT_EXPIRED,
+                        actorType: RecommendationReviewEvent::ACTOR_SYSTEM,
+                        metadata: [
+                            'alert_type' => $recommendation->alert_type,
+                            'source_risk_domain' => $recommendation->source_risk_domain,
+                        ],
+                    );
                 }
             });
     }

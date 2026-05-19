@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\CaseRecommendationReviewConflict;
 use App\Http\Controllers\Controller;
 use App\Models\CaseRecommendation;
+use App\Models\RecommendationReviewEvent;
 use App\Services\Agents\CaseRecommendationService;
 use App\Services\CaseRecommendationReviewService;
+use App\Services\RecommendationReviewAuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -16,6 +18,7 @@ class CaseRecommendationController extends Controller
     public function __construct(
         private readonly CaseRecommendationReviewService $reviewService,
         private readonly CaseRecommendationService $caseRecommendationService,
+        private readonly RecommendationReviewAuditService $reviewAuditService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -80,8 +83,27 @@ class CaseRecommendationController extends Controller
             return response()->json(['error' => 'Case recommendation not found'], 404);
         }
 
+        $this->reviewAuditService->record(
+            companyId: $companyId,
+            recommendationType: RecommendationReviewEvent::TYPE_CASE,
+            recommendationId: $recommendation->id,
+            eventType: RecommendationReviewEvent::EVENT_VIEWED,
+            actorType: RecommendationReviewEvent::ACTOR_USER,
+            actorId: $request->user()->id,
+            metadata: [
+                'source' => 'api',
+            ],
+        );
+
+        $payload = $this->caseRecommendationService->recommendationPayload($recommendation);
+        $payload['review_events'] = $this->reviewAuditService->history(
+            $companyId,
+            RecommendationReviewEvent::TYPE_CASE,
+            $recommendation->id,
+        );
+
         return response()->json([
-            'recommendation' => $this->caseRecommendationService->recommendationPayload($recommendation),
+            'recommendation' => $payload,
         ]);
     }
 

@@ -5,10 +5,15 @@ namespace App\Services;
 use App\Exceptions\AlertRecommendationReviewConflict;
 use App\Models\Alert;
 use App\Models\AlertRecommendation;
+use App\Models\RecommendationReviewEvent;
 use Illuminate\Support\Facades\DB;
 
 class AlertRecommendationReviewService
 {
+    public function __construct(
+        private readonly RecommendationReviewAuditService $reviewAuditService,
+    ) {}
+
     /**
      * @return array{recommendation: AlertRecommendation, alert: Alert}|null
      */
@@ -40,6 +45,20 @@ class AlertRecommendationReviewService
                 'reviewed_at' => now(),
             ]);
 
+            $this->reviewAuditService->record(
+                companyId: $companyId,
+                recommendationType: RecommendationReviewEvent::TYPE_ALERT,
+                recommendationId: $recommendation->id,
+                eventType: RecommendationReviewEvent::EVENT_APPROVED,
+                actorType: RecommendationReviewEvent::ACTOR_USER,
+                actorId: $userId,
+                metadata: [
+                    'alert_id' => $alert->id,
+                    'alert_type' => $recommendation->alert_type,
+                    'severity' => $recommendation->severity,
+                ],
+            );
+
             return [
                 'recommendation' => $recommendation->fresh(['alert']),
                 'alert' => $alert->fresh(['recommendation']),
@@ -63,6 +82,20 @@ class AlertRecommendationReviewService
                 'reviewed_at' => now(),
                 'review_note' => $reviewNote,
             ]);
+
+            $this->reviewAuditService->record(
+                companyId: $companyId,
+                recommendationType: RecommendationReviewEvent::TYPE_ALERT,
+                recommendationId: $recommendation->id,
+                eventType: RecommendationReviewEvent::EVENT_DISMISSED,
+                actorType: RecommendationReviewEvent::ACTOR_USER,
+                actorId: $userId,
+                metadata: [
+                    'alert_type' => $recommendation->alert_type,
+                    'severity' => $recommendation->severity,
+                    'has_review_note' => $reviewNote !== null && $reviewNote !== '',
+                ],
+            );
 
             return $recommendation->fresh(['alert']);
         });

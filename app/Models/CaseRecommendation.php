@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class CaseRecommendation extends Model
@@ -84,5 +85,11 @@ class CaseRecommendation extends Model
     public function auditCase(): HasOne
     {
         return $this->hasOne(AuditCase::class, 'case_recommendation_id');
+    }
+
+    public function reviewEvents(): HasMany
+    {
+        return $this->hasMany(RecommendationReviewEvent::class, 'recommendation_id')
+            ->where('recommendation_type', RecommendationReviewEvent::TYPE_CASE);
     }
 }

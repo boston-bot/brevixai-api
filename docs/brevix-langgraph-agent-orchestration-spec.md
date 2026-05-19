@@ -873,6 +873,86 @@ dismissed
 expired
 ```
 
+### `case_recommendations`
+
+Purpose:
+
+Store deterministic investigation case recommendations until a human user approves or dismisses them. Agents can request recommendations through protected internal tool endpoints, but cannot create audit cases directly and cannot approve or dismiss recommendations.
+
+Suggested fields:
+
+```text
+id
+company_id
+case_type
+severity
+title
+summary
+source_risk_domains
+related_alert_recommendation_ids
+evidence
+confidence_score
+requires_human_review
+can_auto_create
+status
+reviewed_by_user_id
+reviewed_at
+review_note
+created_at
+updated_at
+```
+
+Required invariants:
+
+```text
+requires_human_review = true
+can_auto_create = false
+```
+
+Statuses:
+
+```text
+pending_review
+approved
+dismissed
+expired
+```
+
+### `recommendation_review_events`
+
+Purpose:
+
+Create a consistent audit trail for alert and case recommendation lifecycle events without duplicating sensitive evidence payloads.
+
+Suggested fields:
+
+```text
+id
+company_id
+recommendation_type: alert | case
+recommendation_id
+event_type: created | viewed | approved | dismissed | expired
+actor_type: user | system | agent
+actor_id
+event_metadata
+created_at
+```
+
+Review audit lifecycle:
+
+- `created`: recorded when Laravel persists a new alert or case recommendation. Actor is usually `system`; an agent actor is allowed only for generated/read events.
+- `viewed`: recorded when an authenticated user opens a recommendation detail endpoint. The detail response includes `review_events`.
+- `approved`: recorded only after an authenticated user approves a recommendation. Actor must be `user`. Alert approval creates an alert; case approval creates an audit case.
+- `dismissed`: recorded only after an authenticated user dismisses a recommendation. Actor must be `user`. No alert or case is created.
+- `expired`: recorded when deterministic recommendation generation expires a stale pending recommendation. Actor is `system`.
+
+Audit safety rules:
+
+- Approval and dismissal events must always have `actor_type=user`.
+- Agents must never approve or dismiss recommendations.
+- Agents must not access the database directly; they call protected Laravel tool endpoints.
+- `event_metadata` stores high-level context only, such as recommendation type, severity, related created record id, or whether a review note exists. It must not include recommendation `evidence`, nested `supporting_evidence`, raw transaction payloads, or sensitive review-note text.
+
 ---
 
 ## React Frontend Requirements

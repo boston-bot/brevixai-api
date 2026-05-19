@@ -6,6 +6,7 @@ use App\Exceptions\CaseRecommendationReviewConflict;
 use App\Models\AuditCase;
 use App\Models\AuditCaseEvent;
 use App\Models\CaseRecommendation;
+use App\Models\RecommendationReviewEvent;
 use App\Services\Agents\CaseRecommendationService;
 use Illuminate\Support\Facades\DB;
 
@@ -13,6 +14,7 @@ class CaseRecommendationReviewService
 {
     public function __construct(
         private readonly CaseRecommendationService $caseRecommendationService,
+        private readonly RecommendationReviewAuditService $reviewAuditService,
     ) {}
 
     /**
@@ -57,6 +59,20 @@ class CaseRecommendationReviewService
                 'reviewed_at' => now(),
             ]);
 
+            $this->reviewAuditService->record(
+                companyId: $companyId,
+                recommendationType: RecommendationReviewEvent::TYPE_CASE,
+                recommendationId: $recommendation->id,
+                eventType: RecommendationReviewEvent::EVENT_APPROVED,
+                actorType: RecommendationReviewEvent::ACTOR_USER,
+                actorId: $userId,
+                metadata: [
+                    'case_id' => $case->id,
+                    'case_type' => $recommendation->case_type,
+                    'severity' => $recommendation->severity,
+                ],
+            );
+
             return [
                 'recommendation' => $this->caseRecommendationService->recommendationPayload(
                     $recommendation->fresh(['auditCase']),
@@ -82,6 +98,20 @@ class CaseRecommendationReviewService
                 'reviewed_at' => now(),
                 'review_note' => $reviewNote,
             ]);
+
+            $this->reviewAuditService->record(
+                companyId: $companyId,
+                recommendationType: RecommendationReviewEvent::TYPE_CASE,
+                recommendationId: $recommendation->id,
+                eventType: RecommendationReviewEvent::EVENT_DISMISSED,
+                actorType: RecommendationReviewEvent::ACTOR_USER,
+                actorId: $userId,
+                metadata: [
+                    'case_type' => $recommendation->case_type,
+                    'severity' => $recommendation->severity,
+                    'has_review_note' => $reviewNote !== null && $reviewNote !== '',
+                ],
+            );
 
             return [
                 'recommendation' => $this->caseRecommendationService->recommendationPayload(

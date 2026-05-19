@@ -3,6 +3,8 @@
 namespace App\Services\Agents;
 
 use App\Models\CaseRecommendation;
+use App\Models\RecommendationReviewEvent;
+use App\Services\RecommendationReviewAuditService;
 
 class CaseRecommendationService
 {
@@ -30,6 +32,7 @@ class CaseRecommendationService
         private readonly VendorRiskScoringService $vendorRiskScoringService,
         private readonly ReconciliationRiskScoringService $reconciliationRiskScoringService,
         private readonly EntityRelationshipRiskScoringService $entityRelationshipRiskScoringService,
+        private readonly RecommendationReviewAuditService $reviewAuditService,
     ) {}
 
     /**
@@ -424,6 +427,8 @@ class CaseRecommendationService
                 ]);
             }
 
+            $isNewRecommendation = ! $record->exists;
+
             $record->fill([
                 'severity' => (string) ($recommendation['severity'] ?? 'medium'),
                 'title' => (string) ($recommendation['title'] ?? 'Review case recommendation'),
@@ -437,6 +442,23 @@ class CaseRecommendationService
                 'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
             ]);
             $record->save();
+
+            if ($isNewRecommendation) {
+                $this->reviewAuditService->record(
+                    companyId: $companyId,
+                    recommendationType: RecommendationReviewEvent::TYPE_CASE,
+                    recommendationId: $record->id,
+                    eventType: RecommendationReviewEvent::EVENT_CREATED,
+                    actorType: RecommendationReviewEvent::ACTOR_SYSTEM,
+                    metadata: [
+                        'case_type' => $record->case_type,
+                        'severity' => $record->severity,
+                        'source_risk_domains' => $record->source_risk_domains ?? [],
+                        'related_alert_recommendation_ids' => $record->related_alert_recommendation_ids ?? [],
+                        'confidence_score' => $record->confidence_score,
+                    ],
+                );
+            }
 
             $persisted[] = $this->recommendationPayload($record);
         }
@@ -458,6 +480,18 @@ class CaseRecommendationService
             ->each(function (CaseRecommendation $recommendation) use ($activeKeys): void {
                 if (! in_array($recommendation->case_type, $activeKeys, true)) {
                     $recommendation->update(['status' => CaseRecommendation::STATUS_EXPIRED]);
+
+                    $this->reviewAuditService->record(
+                        companyId: $recommendation->company_id,
+                        recommendationType: RecommendationReviewEvent::TYPE_CASE,
+                        recommendationId: $recommendation->id,
+                        eventType: RecommendationReviewEvent::EVENT_EXPIRED,
+                        actorType: RecommendationReviewEvent::ACTOR_SYSTEM,
+                        metadata: [
+                            'case_type' => $recommendation->case_type,
+                            'source_risk_domains' => $recommendation->source_risk_domains ?? [],
+                        ],
+                    );
                 }
             });
     }
