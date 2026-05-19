@@ -30,6 +30,8 @@ class InvestigationActivityEvent extends Model
 
     public const EVENT_RECOMMENDATION_APPROVED = 'recommendation_approved';
 
+    public const EVENT_REPORT_GENERATED = 'report_generated';
+
     protected $keyType = 'string';
 
     public $incrementing = false;

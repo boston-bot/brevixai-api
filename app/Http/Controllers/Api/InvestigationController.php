@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\InvestigationActivityEvent;
 use App\Models\InvestigationEvidenceItem;
 use App\Services\InvestigationEvidenceService;
+use App\Services\InvestigationReportService;
 use App\Services\InvestigationService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +18,7 @@ class InvestigationController extends Controller
     public function __construct(
         private readonly InvestigationService $investigationService,
         private readonly InvestigationEvidenceService $evidenceService,
+        private readonly InvestigationReportService $reportService,
     ) {}
 
     /**
@@ -261,5 +264,39 @@ class InvestigationController extends Controller
         }
 
         return response()->json(['deleted' => true]);
+    }
+
+    /**
+     * POST /api/investigations/{id}/reports
+     */
+    public function generateReport(Request $request, string $id): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        $request->validate([
+            'format' => ['sometimes', 'string', Rule::in(['json'])],
+        ]);
+
+        try {
+            $result = $this->reportService->generate(
+                companyId: $companyId,
+                caseId: $id,
+                actorType: InvestigationActivityEvent::ACTOR_USER,
+                actorId: $request->user()->id,
+            );
+        } catch (Exception $e) {
+            $status = match ($e->getCode()) {
+                404 => 404,
+                403 => 403,
+                default => 500,
+            };
+
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        return response()->json($result);
     }
 }
