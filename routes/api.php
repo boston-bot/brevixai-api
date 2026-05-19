@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AccountingController;
 use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AlertRecommendationController;
+use App\Http\Controllers\Api\InvestigationController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
@@ -151,6 +152,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/events', [CaseController::class, 'addEvent']);
         Route::post('/{id}/alerts', [CaseController::class, 'linkAlert']);
         Route::delete('/{id}/alerts/{alertId}', [CaseController::class, 'unlinkAlert']);
+    });
+
+    // Investigations
+    Route::prefix('investigations')->group(function () {
+        Route::get('/', [InvestigationController::class, 'index']);
+        Route::get('/{id}', [InvestigationController::class, 'show']);
+        Route::post('/{id}/assign', [InvestigationController::class, 'assign']);
+        Route::post('/{id}/status', [InvestigationController::class, 'status']);
+        Route::post('/{id}/notes', [InvestigationController::class, 'notes']);
     });
 
     // Case Recommendations

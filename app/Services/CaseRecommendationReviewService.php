@@ -6,15 +6,19 @@ use App\Exceptions\CaseRecommendationReviewConflict;
 use App\Models\AuditCase;
 use App\Models\AuditCaseEvent;
 use App\Models\CaseRecommendation;
+use App\Models\InvestigationActivityEvent;
 use App\Models\RecommendationReviewEvent;
 use App\Services\Agents\CaseRecommendationService;
+use App\Services\InvestigationService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class CaseRecommendationReviewService
 {
     public function __construct(
         private readonly CaseRecommendationService $caseRecommendationService,
         private readonly RecommendationReviewAuditService $reviewAuditService,
+        private readonly InvestigationService $investigationService,
     ) {}
 
     /**
@@ -52,6 +56,23 @@ class CaseRecommendationReviewService
                     'related_alert_recommendation_ids' => $recommendation->related_alert_recommendation_ids ?? [],
                 ],
             ]);
+
+            if (Schema::hasTable('investigation_activity_events')) {
+                $this->investigationService->recordActivity(
+                    caseId: $case->id,
+                    companyId: $companyId,
+                    eventType: InvestigationActivityEvent::EVENT_CASE_CREATED,
+                    actorType: InvestigationActivityEvent::ACTOR_USER,
+                    actorId: $userId,
+                    eventSummary: 'Investigation opened from approved case recommendation',
+                    eventMetadata: [
+                        'case_recommendation_id' => $recommendation->id,
+                        'case_type' => $recommendation->case_type,
+                        'source_risk_domains' => $recommendation->source_risk_domains ?? [],
+                        'confidence_score' => $recommendation->confidence_score,
+                    ],
+                );
+            }
 
             $recommendation->update([
                 'status' => CaseRecommendation::STATUS_APPROVED,
