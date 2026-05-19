@@ -953,6 +953,17 @@ Audit safety rules:
 - Agents must not access the database directly; they call protected Laravel tool endpoints.
 - `event_metadata` stores high-level context only, such as recommendation type, severity, related created record id, or whether a review note exists. It must not include recommendation `evidence`, nested `supporting_evidence`, raw transaction payloads, or sensitive review-note text.
 
+Recommendation expiration lifecycle:
+
+- Pending alert and case recommendations expire after the configured `RECOMMENDATION_EXPIRATION_DAYS` window. The default is 30 days.
+- Expiration is performed by Laravel only through `php artisan recommendations:expire`, which should run from the Laravel scheduler.
+- The command only updates `pending_review` recommendations older than the configured window. It never creates alerts or audit cases.
+- Approved and dismissed recommendations are terminal user-reviewed states and never expire.
+- Expiration changes the recommendation `status` to `expired` and records a `recommendation_review_events` row with `event_type=expired`, `actor_type=system`, and no `actor_id`.
+- Expiration event metadata may include high-level fields such as recommendation type, severity, expiration window, and cutoff timestamp. It must not include recommendation evidence, supporting evidence, raw transactions, or review-note text.
+- Expired recommendations remain visible through detail endpoints with their review history, but they cannot be approved or dismissed. Review attempts must return a conflict with the current `expired` status.
+- List endpoints default to `pending_review` recommendations. Users can request `approved`, `dismissed`, `expired`, or `all` with the `status` filter.
+
 ---
 
 ## React Frontend Requirements
@@ -1651,6 +1662,7 @@ Backend:
 - expose entity graph endpoint
 - expose case creation endpoint
 - add case draft/approval flow
+- add recommendation expiration command and audit lifecycle
 
 Frontend:
 
