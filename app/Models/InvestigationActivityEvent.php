@@ -32,6 +32,8 @@ class InvestigationActivityEvent extends Model
 
     public const EVENT_REPORT_GENERATED = 'report_generated';
 
+    public const EVENT_PACKAGE_MANIFEST_GENERATED = 'package_manifest_generated';
+
     protected $keyType = 'string';
 
     public $incrementing = false;

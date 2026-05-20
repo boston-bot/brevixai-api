@@ -166,6 +166,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}/evidence/{evidenceItemId}', [InvestigationController::class, 'removeEvidence']);
         Route::get('/{id}/reports', [InvestigationController::class, 'reportExports']);
         Route::post('/{id}/reports', [InvestigationController::class, 'generateReport']);
+        Route::post('/{id}/package-manifest', [InvestigationController::class, 'generatePackageManifest']);
     });
 
     // Case Recommendations

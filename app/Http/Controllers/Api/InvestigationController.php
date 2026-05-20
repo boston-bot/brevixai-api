@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\InvestigationActivityEvent;
 use App\Models\InvestigationEvidenceItem;
 use App\Services\InvestigationEvidenceService;
+use App\Services\InvestigationPackageManifestService;
 use App\Services\InvestigationReportService;
 use App\Services\InvestigationService;
 use Exception;
@@ -20,6 +21,7 @@ class InvestigationController extends Controller
         private readonly InvestigationService $investigationService,
         private readonly InvestigationEvidenceService $evidenceService,
         private readonly InvestigationReportService $reportService,
+        private readonly InvestigationPackageManifestService $packageManifestService,
     ) {}
 
     /**
@@ -280,6 +282,45 @@ class InvestigationController extends Controller
         $result = $this->investigationService->reportExports($companyId, $id);
         if (! $result) {
             return response()->json(['error' => 'Investigation not found'], 404);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * POST /api/investigations/{id}/package-manifest
+     *
+     * User-triggered only. Generates a non-persistent sanitized manifest for
+     * investigation export package review.
+     */
+    public function generatePackageManifest(Request $request, string $id): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        $validated = $request->validate([
+            'format' => ['required', 'string', Rule::in(['json'])],
+        ]);
+
+        try {
+            $result = $this->packageManifestService->generate(
+                companyId: $companyId,
+                caseId: $id,
+                actorType: InvestigationActivityEvent::ACTOR_USER,
+                actorId: $request->user()->id,
+                format: $validated['format'],
+            );
+        } catch (Exception $e) {
+            $status = match ($e->getCode()) {
+                404 => 404,
+                403 => 403,
+                422 => 422,
+                default => 500,
+            };
+
+            return response()->json(['error' => $e->getMessage()], $status);
         }
 
         return response()->json($result);
