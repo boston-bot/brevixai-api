@@ -78,6 +78,51 @@ class InvestigationEvidenceLedgerTest extends TestCase
             ->assertJsonPath('total', 0);
     }
 
+    public function test_evidence_endpoints_require_authentication(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $item = $this->createEvidenceItem($case->id, $company->id);
+
+        $this->getJson("/api/investigations/{$case->id}/evidence")->assertUnauthorized();
+        $this->postJson("/api/investigations/{$case->id}/evidence", [
+            'evidence_type' => 'note',
+            'title' => 'Unauthenticated evidence',
+            'summary' => 'Should not be accepted.',
+            'source' => 'manual',
+        ])->assertUnauthorized();
+        $this->deleteJson("/api/investigations/{$case->id}/evidence/{$item->id}")->assertUnauthorized();
+    }
+
+    public function test_list_evidence_sanitizes_stored_metadata(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $this->createEvidenceItem($case->id, $company->id, [
+            'metadata' => [
+                'safe_label' => 'visible',
+                'raw_payload' => 'secret-raw-payload',
+                'nested' => [
+                    'supporting_evidence' => ['transaction_id' => 'secret-transaction'],
+                    'safe_count' => 3,
+                ],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/investigations/{$case->id}/evidence");
+
+        $response->assertOk()
+            ->assertJsonPath('evidence_items.0.metadata.safe_label', 'visible')
+            ->assertJsonPath('evidence_items.0.metadata.nested.safe_count', 3)
+            ->assertJsonMissingPath('evidence_items.0.metadata.raw_payload')
+            ->assertJsonMissingPath('evidence_items.0.metadata.nested.supporting_evidence');
+
+        $this->assertStringNotContainsString('secret-raw-payload', $response->getContent());
+        $this->assertStringNotContainsString('secret-transaction', $response->getContent());
+    }
+
     // -------------------------------------------------------------------------
     // Add transaction evidence
     // -------------------------------------------------------------------------
@@ -384,6 +429,29 @@ class InvestigationEvidenceLedgerTest extends TestCase
             ->assertJsonCount(1, 'evidence_items')
             ->assertJsonPath('evidence_items.0.evidence_type', InvestigationEvidenceItem::TYPE_TRANSACTION)
             ->assertJsonPath('evidence_items.0.title', 'Key transaction');
+    }
+
+    public function test_investigation_detail_sanitizes_evidence_item_metadata(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->createEvidenceItem($case->id, $company->id, [
+            'metadata' => [
+                'safe_label' => 'visible',
+                'transaction_details' => ['account' => 'secret-account'],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/investigations/{$case->id}");
+
+        $response->assertOk()
+            ->assertJsonPath('evidence_items.0.metadata.safe_label', 'visible')
+            ->assertJsonMissingPath('evidence_items.0.metadata.transaction_details');
+
+        $this->assertStringNotContainsString('secret-account', $response->getContent());
     }
 
     public function test_investigation_detail_includes_empty_evidence_items_when_none(): void

@@ -35,6 +35,10 @@ class RecommendationReviewAuditService
         'evidence',
         'supporting_evidence',
         'raw_evidence',
+        'transaction_details',
+        'raw_payload',
+        'review_note',
+        'payload',
     ];
 
     /**
@@ -89,7 +93,7 @@ class RecommendationReviewAuditService
                 'event_type' => $event->event_type,
                 'actor_type' => $event->actor_type,
                 'actor_id' => $event->actor_id,
-                'event_metadata' => $event->event_metadata,
+                'event_metadata' => $this->sanitizeStoredMetadata($event->event_metadata),
                 'created_at' => $event->created_at?->toIso8601String(),
             ])
             ->values()
@@ -138,5 +142,24 @@ class RecommendationReviewAuditService
         }
 
         return $redacted;
+    }
+
+    private function sanitizeStoredMetadata(mixed $metadata): ?array
+    {
+        if ($metadata === null || $metadata === '') {
+            return null;
+        }
+
+        if (is_array($metadata)) {
+            return $this->redactSensitiveMetadata($metadata);
+        }
+
+        if (! is_string($metadata)) {
+            return null;
+        }
+
+        $decoded = json_decode($metadata, true);
+
+        return is_array($decoded) ? $this->redactSensitiveMetadata($decoded) : null;
     }
 }

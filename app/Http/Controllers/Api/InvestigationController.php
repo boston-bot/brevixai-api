@@ -9,11 +9,12 @@ use App\Services\InvestigationEvidenceService;
 use App\Services\InvestigationPackageManifestService;
 use App\Services\InvestigationReportService;
 use App\Services\InvestigationService;
-use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class InvestigationController extends Controller
 {
@@ -42,7 +43,11 @@ class InvestigationController extends Controller
             'offset' => ['sometimes', 'integer', 'min:0'],
         ]);
 
-        $data = $this->investigationService->list($companyId, $validated);
+        try {
+            $data = $this->investigationService->list($companyId, $validated);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_list');
+        }
 
         return response()->json($data);
     }
@@ -57,7 +62,12 @@ class InvestigationController extends Controller
             return response()->json(['error' => 'No company associated with account'], 403);
         }
 
-        $detail = $this->investigationService->detail($companyId, $id);
+        try {
+            $detail = $this->investigationService->detail($companyId, $id);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_detail');
+        }
+
         if (! $detail) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
@@ -86,14 +96,8 @@ class InvestigationController extends Controller
                 $id,
                 $validated['assignee_id'],
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                422 => 422,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_assign', [404, 422]);
         }
 
         return response()->json($result);
@@ -120,14 +124,8 @@ class InvestigationController extends Controller
                 $id,
                 $validated['investigation_status'],
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                422 => 422,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_status', [404, 422]);
         }
 
         return response()->json($result);
@@ -154,13 +152,8 @@ class InvestigationController extends Controller
                 $id,
                 $validated['notes'],
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_notes', [404]);
         }
 
         return response()->json($result);
@@ -178,13 +171,8 @@ class InvestigationController extends Controller
 
         try {
             $result = $this->evidenceService->list($companyId, $id);
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_evidence_list', [404]);
         }
 
         return response()->json($result);
@@ -225,14 +213,8 @@ class InvestigationController extends Controller
                 caseId: $id,
                 data: $validated,
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                403 => 403,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_evidence_add', [403, 404]);
         }
 
         return response()->json($result, 201);
@@ -256,14 +238,8 @@ class InvestigationController extends Controller
                 caseId: $id,
                 evidenceItemId: $evidenceItemId,
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                403 => 403,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_evidence_remove', [403, 404]);
         }
 
         return response()->json(['deleted' => true]);
@@ -279,7 +255,12 @@ class InvestigationController extends Controller
             return response()->json(['error' => 'No company associated with account'], 403);
         }
 
-        $result = $this->investigationService->reportExports($companyId, $id);
+        try {
+            $result = $this->investigationService->reportExports($companyId, $id);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_report_exports');
+        }
+
         if (! $result) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
@@ -312,15 +293,8 @@ class InvestigationController extends Controller
                 actorId: $request->user()->id,
                 format: $validated['format'],
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                403 => 403,
-                422 => 422,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_package_manifest', [403, 404, 422]);
         }
 
         return response()->json($result);
@@ -370,16 +344,35 @@ class InvestigationController extends Controller
                 actorType: InvestigationActivityEvent::ACTOR_USER,
                 actorId: $request->user()->id,
             );
-        } catch (Exception $e) {
-            $status = match ($e->getCode()) {
-                404 => 404,
-                403 => 403,
-                default => 500,
-            };
-
-            return response()->json(['error' => $e->getMessage()], $status);
+        } catch (Throwable $e) {
+            return $this->safeServiceError($e, 'investigation_report_generate', [403, 404]);
         }
 
         return response()->json($result);
+    }
+
+    /**
+     * @param  array<int, int>  $safeStatusCodes
+     */
+    private function safeServiceError(
+        Throwable $e,
+        string $operation,
+        array $safeStatusCodes = [403, 404, 422],
+    ): JsonResponse {
+        $status = (int) $e->getCode();
+
+        if (in_array($status, $safeStatusCodes, true)) {
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        Log::warning('investigation_workspace.failed', [
+            'operation' => $operation,
+            'error_class' => $e::class,
+            'error_code' => $status ?: null,
+        ]);
+
+        return response()->json([
+            'error' => 'Investigation request could not be completed safely',
+        ], 500);
     }
 }

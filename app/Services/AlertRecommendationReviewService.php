@@ -6,6 +6,8 @@ use App\Exceptions\AlertRecommendationReviewConflict;
 use App\Models\Alert;
 use App\Models\AlertRecommendation;
 use App\Models\RecommendationReviewEvent;
+use App\Models\User;
+use Exception;
 use Illuminate\Support\Facades\DB;
 
 class AlertRecommendationReviewService
@@ -17,9 +19,15 @@ class AlertRecommendationReviewService
     /**
      * @return array{recommendation: AlertRecommendation, alert: Alert}|null
      */
-    public function approve(string $companyId, string $userId, string $recommendationId): ?array
-    {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId): ?array {
+    public function approve(
+        string $companyId,
+        string $userId,
+        string $recommendationId,
+        string $actorType = RecommendationReviewEvent::ACTOR_USER,
+    ): ?array {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $actorType): ?array {
+            $this->assertHumanReviewer($companyId, $userId, $actorType);
+
             $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
             if (! $recommendation) {
                 return null;
@@ -66,9 +74,16 @@ class AlertRecommendationReviewService
         });
     }
 
-    public function dismiss(string $companyId, string $userId, string $recommendationId, ?string $reviewNote = null): ?AlertRecommendation
-    {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote): ?AlertRecommendation {
+    public function dismiss(
+        string $companyId,
+        string $userId,
+        string $recommendationId,
+        ?string $reviewNote = null,
+        string $actorType = RecommendationReviewEvent::ACTOR_USER,
+    ): ?AlertRecommendation {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote, $actorType): ?AlertRecommendation {
+            $this->assertHumanReviewer($companyId, $userId, $actorType);
+
             $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
             if (! $recommendation) {
                 return null;
@@ -143,5 +158,24 @@ class AlertRecommendationReviewService
             'info' => 20,
             default => 40,
         };
+    }
+
+    private function assertHumanReviewer(string $companyId, string $userId, string $actorType): void
+    {
+        if ($actorType === RecommendationReviewEvent::ACTOR_AGENT) {
+            throw new Exception('Agents cannot approve or dismiss alert recommendations', 403);
+        }
+
+        if ($actorType !== RecommendationReviewEvent::ACTOR_USER) {
+            throw new Exception('Only users can approve or dismiss alert recommendations', 403);
+        }
+
+        $authorized = User::where('id', $userId)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (! $authorized) {
+            throw new Exception('Reviewer is not authorized for this company', 403);
+        }
     }
 }

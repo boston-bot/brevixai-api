@@ -196,6 +196,43 @@ class RecommendationReviewAuditTrailTest extends TestCase
             ->assertJsonPath('recommendation.review_events.1.actor_type', RecommendationReviewEvent::ACTOR_USER);
     }
 
+    public function test_review_history_sanitizes_stored_sensitive_metadata(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $recommendation = $this->createAlertRecommendation($company->id);
+
+        RecommendationReviewEvent::create([
+            'company_id' => $company->id,
+            'recommendation_type' => RecommendationReviewEvent::TYPE_ALERT,
+            'recommendation_id' => $recommendation->id,
+            'event_type' => RecommendationReviewEvent::EVENT_CREATED,
+            'actor_type' => RecommendationReviewEvent::ACTOR_SYSTEM,
+            'actor_id' => null,
+            'event_metadata' => [
+                'safe_field' => 'visible',
+                'raw_payload' => 'secret-raw-payload',
+                'nested' => [
+                    'review_note' => 'secret-review-note',
+                    'safe_count' => 4,
+                ],
+            ],
+            'created_at' => now()->subMinute(),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/alert-recommendations/{$recommendation->id}");
+
+        $response->assertOk()
+            ->assertJsonPath('recommendation.review_events.0.event_metadata.safe_field', 'visible')
+            ->assertJsonPath('recommendation.review_events.0.event_metadata.nested.safe_count', 4)
+            ->assertJsonMissingPath('recommendation.review_events.0.event_metadata.raw_payload')
+            ->assertJsonMissingPath('recommendation.review_events.0.event_metadata.nested.review_note');
+
+        $this->assertStringNotContainsString('secret-raw-payload', $response->getContent());
+        $this->assertStringNotContainsString('secret-review-note', $response->getContent());
+    }
+
     public function test_case_recommendation_history_returned(): void
     {
         [$company, $user] = $this->createCompanyUser();

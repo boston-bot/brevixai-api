@@ -9,6 +9,7 @@ use App\Models\InvestigationEvidenceItem;
 use App\Models\InvestigationReportExport;
 use App\Models\User;
 use App\Services\InvestigationReportService;
+use App\Services\InvestigationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -548,6 +549,45 @@ class InvestigationReportExportTest extends TestCase
             ->assertJsonMissingPath('report_exports.0.payload');
     }
 
+    public function test_report_export_history_sanitizes_metadata(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        InvestigationReportExport::create([
+            'audit_case_id' => $case->id,
+            'company_id' => $company->id,
+            'generated_by_user_id' => $user->id,
+            'format' => InvestigationReportExport::FORMAT_JSON,
+            'filename' => null,
+            'report_hash' => str_repeat('c', 64),
+            'generated_at' => now(),
+            'metadata' => [
+                'evidence_item_count' => 1,
+                'activity_event_count' => 2,
+                'raw_payload' => 'secret-export-payload',
+                'nested' => [
+                    'transaction_details' => ['account' => 'secret-account'],
+                    'safe_count' => 7,
+                ],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/investigations/{$case->id}/reports");
+
+        $response->assertOk()
+            ->assertJsonPath('report_exports.0.metadata.evidence_item_count', 1)
+            ->assertJsonPath('report_exports.0.metadata.activity_event_count', 2)
+            ->assertJsonPath('report_exports.0.metadata.nested.safe_count', 7)
+            ->assertJsonMissingPath('report_exports.0.metadata.raw_payload')
+            ->assertJsonMissingPath('report_exports.0.metadata.nested.transaction_details');
+
+        $this->assertStringNotContainsString('secret-export-payload', $response->getContent());
+        $this->assertStringNotContainsString('secret-account', $response->getContent());
+    }
+
     public function test_investigation_detail_includes_report_exports(): void
     {
         [$company, $user] = $this->createCompanyUser();
@@ -580,6 +620,38 @@ class InvestigationReportExportTest extends TestCase
         Sanctum::actingAs($user);
 
         $this->getJson("/api/investigations/{$case->id}/reports")->assertNotFound();
+    }
+
+    public function test_generate_report_returns_safe_error_shape(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->app->instance(
+            InvestigationReportService::class,
+            new class(app(InvestigationService::class)) extends InvestigationReportService
+            {
+                public function generate(
+                    string $companyId,
+                    string $caseId,
+                    string $actorType,
+                    string $actorId,
+                ): array {
+                    throw new \RuntimeException('raw_payload secret should not be exposed');
+                }
+            },
+        );
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'json']);
+
+        $response->assertStatus(500)
+            ->assertJson(['error' => 'Investigation request could not be completed safely']);
+
+        $this->assertArrayNotHasKey('exception', $response->json());
+        $this->assertArrayNotHasKey('trace', $response->json());
+        $this->assertStringNotContainsString('raw_payload secret', $response->getContent());
     }
 
     public function test_sensitive_metadata_excluded_from_export_record(): void

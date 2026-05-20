@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\AlertRecommendation;
 use App\Models\Company;
+use App\Models\RecommendationReviewEvent;
 use App\Models\User;
+use App\Services\AlertRecommendationReviewService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -53,6 +55,17 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             ->assertOk()
             ->assertJsonPath('recommendation.id', $recommendation->id)
             ->assertJsonPath('recommendation.evidence.flagged_vendor_count', 2);
+    }
+
+    public function test_user_recommendation_endpoints_require_authentication(): void
+    {
+        [$company] = $this->createCompanyUser();
+        $recommendation = $this->createRecommendation($company->id);
+
+        $this->getJson('/api/alert-recommendations')->assertUnauthorized();
+        $this->getJson("/api/alert-recommendations/{$recommendation->id}")->assertUnauthorized();
+        $this->postJson("/api/alert-recommendations/{$recommendation->id}/approve")->assertUnauthorized();
+        $this->postJson("/api/alert-recommendations/{$recommendation->id}/dismiss")->assertUnauthorized();
     }
 
     public function test_approve_creates_alert(): void
@@ -155,6 +168,76 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
         $this->withToken('test-agent-key')
             ->postJson("/api/alert-recommendations/{$recommendation->id}/approve")
             ->assertUnauthorized();
+
+        $this->assertDatabaseHas('alert_recommendations', [
+            'id' => $recommendation->id,
+            'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+        $this->assertDatabaseCount('alerts', 0);
+    }
+
+    public function test_agent_actor_cannot_approve_or_dismiss_via_service(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $approvalAttempt = $this->createRecommendation($company->id);
+        $dismissalAttempt = $this->createRecommendation($company->id);
+        $service = app(AlertRecommendationReviewService::class);
+
+        try {
+            $service->approve(
+                companyId: $company->id,
+                userId: $user->id,
+                recommendationId: $approvalAttempt->id,
+                actorType: RecommendationReviewEvent::ACTOR_AGENT,
+            );
+            $this->fail('Agent actor should not approve alert recommendations.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+            $this->assertSame('Agents cannot approve or dismiss alert recommendations', $e->getMessage());
+        }
+
+        try {
+            $service->dismiss(
+                companyId: $company->id,
+                userId: $user->id,
+                recommendationId: $dismissalAttempt->id,
+                actorType: RecommendationReviewEvent::ACTOR_AGENT,
+            );
+            $this->fail('Agent actor should not dismiss alert recommendations.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+            $this->assertSame('Agents cannot approve or dismiss alert recommendations', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('alert_recommendations', [
+            'id' => $approvalAttempt->id,
+            'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+        $this->assertDatabaseHas('alert_recommendations', [
+            'id' => $dismissalAttempt->id,
+            'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+        $this->assertDatabaseCount('alerts', 0);
+    }
+
+    public function test_reviewer_must_belong_to_company_when_service_creates_alert(): void
+    {
+        [$company] = $this->createCompanyUser();
+        [, $otherUser] = $this->createCompanyUser();
+        $recommendation = $this->createRecommendation($company->id);
+        $service = app(AlertRecommendationReviewService::class);
+
+        try {
+            $service->approve(
+                companyId: $company->id,
+                userId: $otherUser->id,
+                recommendationId: $recommendation->id,
+            );
+            $this->fail('Cross-company reviewer should not approve alert recommendations.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+            $this->assertSame('Reviewer is not authorized for this company', $e->getMessage());
+        }
 
         $this->assertDatabaseHas('alert_recommendations', [
             'id' => $recommendation->id,

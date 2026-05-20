@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\CaseRecommendation;
 use App\Models\Company;
+use App\Models\RecommendationReviewEvent;
 use App\Models\User;
 use App\Services\Agents\AggregateRiskSummaryService;
 use App\Services\Agents\AlertRecommendationService;
@@ -11,6 +12,7 @@ use App\Services\Agents\CaseRecommendationService;
 use App\Services\Agents\EntityRelationshipRiskScoringService;
 use App\Services\Agents\ReconciliationRiskScoringService;
 use App\Services\Agents\VendorRiskScoringService;
+use App\Services\CaseRecommendationReviewService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -118,6 +120,17 @@ class CaseRecommendationServiceTest extends TestCase
         ]);
     }
 
+    public function test_user_recommendation_endpoints_require_authentication(): void
+    {
+        [$company] = $this->createCompanyUser();
+        $recommendation = $this->createCaseRecommendation($company->id);
+
+        $this->getJson('/api/case-recommendations')->assertUnauthorized();
+        $this->getJson("/api/case-recommendations/{$recommendation->id}")->assertUnauthorized();
+        $this->postJson("/api/case-recommendations/{$recommendation->id}/approve")->assertUnauthorized();
+        $this->postJson("/api/case-recommendations/{$recommendation->id}/dismiss")->assertUnauthorized();
+    }
+
     public function test_unauthorized_company_access_rejected(): void
     {
         [, $user] = $this->createCompanyUser();
@@ -158,6 +171,76 @@ class CaseRecommendationServiceTest extends TestCase
             ->assertJsonPath('case_recommendations.0.can_auto_create', false);
 
         $this->assertDatabaseCount('case_recommendations', 1);
+        $this->assertDatabaseCount('audit_cases', 0);
+    }
+
+    public function test_agent_actor_cannot_approve_or_dismiss_via_service(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $approvalAttempt = $this->createCaseRecommendation($company->id);
+        $dismissalAttempt = $this->createCaseRecommendation($company->id);
+        $service = app(CaseRecommendationReviewService::class);
+
+        try {
+            $service->approve(
+                companyId: $company->id,
+                userId: $user->id,
+                recommendationId: $approvalAttempt->id,
+                actorType: RecommendationReviewEvent::ACTOR_AGENT,
+            );
+            $this->fail('Agent actor should not approve case recommendations.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+            $this->assertSame('Agents cannot approve or dismiss case recommendations', $e->getMessage());
+        }
+
+        try {
+            $service->dismiss(
+                companyId: $company->id,
+                userId: $user->id,
+                recommendationId: $dismissalAttempt->id,
+                actorType: RecommendationReviewEvent::ACTOR_AGENT,
+            );
+            $this->fail('Agent actor should not dismiss case recommendations.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+            $this->assertSame('Agents cannot approve or dismiss case recommendations', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('case_recommendations', [
+            'id' => $approvalAttempt->id,
+            'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+        $this->assertDatabaseHas('case_recommendations', [
+            'id' => $dismissalAttempt->id,
+            'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+        $this->assertDatabaseCount('audit_cases', 0);
+    }
+
+    public function test_reviewer_must_belong_to_company_when_service_creates_case(): void
+    {
+        [$company] = $this->createCompanyUser();
+        [, $otherUser] = $this->createCompanyUser();
+        $recommendation = $this->createCaseRecommendation($company->id);
+        $service = app(CaseRecommendationReviewService::class);
+
+        try {
+            $service->approve(
+                companyId: $company->id,
+                userId: $otherUser->id,
+                recommendationId: $recommendation->id,
+            );
+            $this->fail('Cross-company reviewer should not approve case recommendations.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+            $this->assertSame('Reviewer is not authorized for this company', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('case_recommendations', [
+            'id' => $recommendation->id,
+            'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
+        ]);
         $this->assertDatabaseCount('audit_cases', 0);
     }
 

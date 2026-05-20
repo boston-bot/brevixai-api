@@ -16,6 +16,8 @@ class InvestigationService
         'raw_evidence',
         'transaction_details',
         'raw_payload',
+        'review_note',
+        'payload',
     ];
 
     public function list(string $companyId, array $filters = []): array
@@ -142,9 +144,7 @@ class InvestigationService
             ->orderBy('iae.created_at', 'asc')
             ->get()
             ->map(function ($event): object {
-                $event->event_metadata = $event->event_metadata
-                    ? json_decode($event->event_metadata, true)
-                    : null;
+                $event->event_metadata = $this->decodeAndSanitizeMetadata($event->event_metadata);
 
                 return $event;
             });
@@ -179,9 +179,7 @@ class InvestigationService
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(function (object $item): object {
-                $item->metadata = $item->metadata
-                    ? json_decode($item->metadata, true)
-                    : null;
+                $item->metadata = $this->decodeAndSanitizeMetadata($item->metadata);
 
                 return $item;
             });
@@ -232,9 +230,7 @@ class InvestigationService
                 'investigation_priority' => $case->investigation_priority,
                 'investigation_summary' => $case->investigation_summary,
                 'investigation_notes' => $case->investigation_notes,
-                'investigation_metadata' => $case->investigation_metadata
-                    ? json_decode($case->investigation_metadata, true)
-                    : null,
+                'investigation_metadata' => $this->decodeAndSanitizeMetadata($case->investigation_metadata),
                 'last_activity_at' => $case->last_activity_at,
                 'assigned_user' => $case->investigation_assigned_user_id
                     ? [
@@ -467,11 +463,28 @@ class InvestigationService
             ->orderBy('ire.generated_at', 'desc')
             ->get()
             ->map(function (object $export): object {
-                $export->metadata = $export->metadata
-                    ? json_decode($export->metadata, true)
-                    : null;
+                $export->metadata = $this->decodeAndSanitizeMetadata($export->metadata);
 
                 return $export;
             });
+    }
+
+    private function decodeAndSanitizeMetadata(mixed $metadata): ?array
+    {
+        if ($metadata === null || $metadata === '') {
+            return null;
+        }
+
+        if (is_array($metadata)) {
+            return $this->sanitizeMetadata($metadata);
+        }
+
+        if (! is_string($metadata)) {
+            return null;
+        }
+
+        $decoded = json_decode($metadata, true);
+
+        return is_array($decoded) ? $this->sanitizeMetadata($decoded) : null;
     }
 }

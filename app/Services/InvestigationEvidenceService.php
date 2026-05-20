@@ -15,6 +15,8 @@ class InvestigationEvidenceService
         'raw_evidence',
         'transaction_details',
         'raw_payload',
+        'review_note',
+        'payload',
     ];
 
     public function __construct(
@@ -50,9 +52,7 @@ class InvestigationEvidenceService
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(function (object $item): object {
-                $item->metadata = $item->metadata
-                    ? json_decode($item->metadata, true)
-                    : null;
+                $item->metadata = $this->decodeAndSanitizeMetadata($item->metadata);
 
                 return $item;
             });
@@ -182,5 +182,24 @@ class InvestigationEvidenceService
         }
 
         return $sanitized;
+    }
+
+    private function decodeAndSanitizeMetadata(mixed $metadata): ?array
+    {
+        if ($metadata === null || $metadata === '') {
+            return null;
+        }
+
+        if (is_array($metadata)) {
+            return $this->sanitizeMetadata($metadata);
+        }
+
+        if (! is_string($metadata)) {
+            return null;
+        }
+
+        $decoded = json_decode($metadata, true);
+
+        return is_array($decoded) ? $this->sanitizeMetadata($decoded) : null;
     }
 }

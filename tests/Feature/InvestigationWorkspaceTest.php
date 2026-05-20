@@ -83,6 +83,23 @@ class InvestigationWorkspaceTest extends TestCase
         $this->getJson('/api/investigations')->assertUnauthorized();
     }
 
+    public function test_investigation_write_endpoints_require_authentication(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->getJson("/api/investigations/{$case->id}")->assertUnauthorized();
+        $this->postJson("/api/investigations/{$case->id}/assign", [
+            'assignee_id' => $user->id,
+        ])->assertUnauthorized();
+        $this->postJson("/api/investigations/{$case->id}/status", [
+            'investigation_status' => 'in_review',
+        ])->assertUnauthorized();
+        $this->postJson("/api/investigations/{$case->id}/notes", [
+            'notes' => 'Unauthenticated note.',
+        ])->assertUnauthorized();
+    }
+
     // -------------------------------------------------------------------------
     // Detail
     // -------------------------------------------------------------------------
@@ -128,6 +145,42 @@ class InvestigationWorkspaceTest extends TestCase
             ->assertJsonCount(2, 'activity_timeline')
             ->assertJsonPath('activity_timeline.0.event_type', InvestigationActivityEvent::EVENT_CASE_CREATED)
             ->assertJsonPath('activity_timeline.1.event_type', InvestigationActivityEvent::EVENT_STATUS_CHANGED);
+    }
+
+    public function test_show_sanitizes_activity_event_metadata(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        InvestigationActivityEvent::create([
+            'audit_case_id' => $case->id,
+            'company_id' => $company->id,
+            'event_type' => InvestigationActivityEvent::EVENT_STATUS_CHANGED,
+            'actor_type' => InvestigationActivityEvent::ACTOR_USER,
+            'actor_id' => $user->id,
+            'event_summary' => 'Status changed',
+            'event_metadata' => [
+                'safe_field' => 'visible',
+                'raw_payload' => 'secret-raw-payload',
+                'nested' => [
+                    'transaction_details' => ['account' => 'secret-account'],
+                    'safe_count' => 2,
+                ],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/investigations/{$case->id}");
+
+        $response->assertOk()
+            ->assertJsonPath('activity_timeline.0.event_metadata.safe_field', 'visible')
+            ->assertJsonPath('activity_timeline.0.event_metadata.nested.safe_count', 2)
+            ->assertJsonMissingPath('activity_timeline.0.event_metadata.raw_payload')
+            ->assertJsonMissingPath('activity_timeline.0.event_metadata.nested.transaction_details');
+
+        $this->assertStringNotContainsString('secret-raw-payload', $response->getContent());
+        $this->assertStringNotContainsString('secret-account', $response->getContent());
     }
 
     public function test_show_returns_404_for_other_company(): void

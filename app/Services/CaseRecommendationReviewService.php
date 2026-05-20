@@ -9,9 +9,9 @@ use App\Models\CaseRecommendation;
 use App\Models\InvestigationActivityEvent;
 use App\Models\InvestigationEvidenceItem;
 use App\Models\RecommendationReviewEvent;
+use App\Models\User;
 use App\Services\Agents\CaseRecommendationService;
-use App\Services\InvestigationEvidenceService;
-use App\Services\InvestigationService;
+use Exception;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -27,9 +27,15 @@ class CaseRecommendationReviewService
     /**
      * @return array{recommendation: array<string, mixed>, case: AuditCase}|null
      */
-    public function approve(string $companyId, string $userId, string $recommendationId): ?array
-    {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId): ?array {
+    public function approve(
+        string $companyId,
+        string $userId,
+        string $recommendationId,
+        string $actorType = RecommendationReviewEvent::ACTOR_USER,
+    ): ?array {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $actorType): ?array {
+            $this->assertHumanReviewer($companyId, $userId, $actorType);
+
             $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
             if (! $recommendation) {
                 return null;
@@ -127,9 +133,16 @@ class CaseRecommendationReviewService
         });
     }
 
-    public function dismiss(string $companyId, string $userId, string $recommendationId, ?string $reviewNote = null): ?array
-    {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote): ?array {
+    public function dismiss(
+        string $companyId,
+        string $userId,
+        string $recommendationId,
+        ?string $reviewNote = null,
+        string $actorType = RecommendationReviewEvent::ACTOR_USER,
+    ): ?array {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote, $actorType): ?array {
+            $this->assertHumanReviewer($companyId, $userId, $actorType);
+
             $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
             if (! $recommendation) {
                 return null;
@@ -186,5 +199,24 @@ class CaseRecommendationReviewService
         $sourceDomains = implode(', ', $recommendation->source_risk_domains ?? []);
 
         return trim($recommendation->summary."\n\nSource risk domains: ".$sourceDomains);
+    }
+
+    private function assertHumanReviewer(string $companyId, string $userId, string $actorType): void
+    {
+        if ($actorType === RecommendationReviewEvent::ACTOR_AGENT) {
+            throw new Exception('Agents cannot approve or dismiss case recommendations', 403);
+        }
+
+        if ($actorType !== RecommendationReviewEvent::ACTOR_USER) {
+            throw new Exception('Only users can approve or dismiss case recommendations', 403);
+        }
+
+        $authorized = User::where('id', $userId)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (! $authorized) {
+            throw new Exception('Reviewer is not authorized for this company', 403);
+        }
     }
 }

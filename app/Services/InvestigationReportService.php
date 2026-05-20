@@ -18,6 +18,8 @@ class InvestigationReportService
         'raw_evidence',
         'transaction_details',
         'raw_payload',
+        'review_note',
+        'payload',
     ];
 
     public function __construct(
