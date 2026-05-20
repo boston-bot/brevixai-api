@@ -28,6 +28,8 @@ php artisan smoke:check
 composer test
 ```
 
+The admin personal finance S3 import path requires `league/flysystem-aws-s3-v3`; run `composer update league/flysystem-aws-s3-v3` after changing Composer dependencies and commit the refreshed lockfile before deploying.
+
 ---
 
 ## Required Migrations
@@ -121,6 +123,29 @@ php artisan migrate:reset
 | `BREVIX_AGENT_SERVICE_KEY` | Yes | Shared secret for agent tool requests |
 | `BREVIX_AGENT_TIMEOUT` | No | Default `60` seconds |
 
+### Admin personal finance
+
+| Variable | Required | Notes |
+|---|---|---|
+| `PERSONAL_FINANCE_ENABLED` | Yes | Set `true` in the dev environment to enable `/api/admin/personal-finance/*` |
+| `PERSONAL_FINANCE_STATEMENT_DISK` | Yes | Set `s3` for deployed imports |
+| `PERSONAL_FINANCE_STATEMENT_PREFIX` | Yes | Set `personal-finance` for `s3://brevix-s3-bucket-1/personal-finance/` |
+| `BREVIX_S3_BUCKET` | Yes | Set `brevix-s3-bucket-1`; avoids Amplify's reserved `AWS_*` env prefix |
+| `BREVIX_S3_ACCESS_KEY_ID` | Yes | Must have read access to the statement prefix |
+| `BREVIX_S3_SECRET_ACCESS_KEY` | Yes | |
+| `BREVIX_S3_REGION` | Yes | Bucket region |
+| `ADMIN_EMAIL` | Yes | `admin@admin.brevixai.com` |
+| `ADMIN_EMAILS` | Yes | Comma-separated admin allowlist; include `admin@admin.brevixai.com` |
+| `ADMIN_PASSWORD` | Yes for seeding | Set in the deployment secret store, then run the admin seeder |
+
+Create or update the admin login after migrations:
+
+```bash
+php artisan db:seed --class=AdminUserSeeder
+```
+
+Do not commit `ADMIN_PASSWORD`; keep it in the environment/secret manager.
+
 ---
 
 ## Storage and PDF Requirements
@@ -153,6 +178,19 @@ chmod -R 775 storage/ bootstrap/cache/
 - Verify with the smoke check: `php artisan smoke:check`
 
 PDF reports are generated dynamically and not written to disk. No persistent storage path is required for PDF output.
+
+### Personal finance statement imports
+
+The admin personal finance import endpoints read PDF statements from Laravel storage. For the dev environment configured for S3:
+
+```env
+PERSONAL_FINANCE_ENABLED=true
+PERSONAL_FINANCE_STATEMENT_DISK=s3
+PERSONAL_FINANCE_STATEMENT_PREFIX=personal-finance
+BREVIX_S3_BUCKET=brevix-s3-bucket-1
+```
+
+The deployed API path is `/api/admin/personal-finance/*`. The legacy `/api/local/personal-finance/*` path remains available only in configured local/testing environments.
 
 ---
 
