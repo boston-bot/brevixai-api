@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/joe.eagan/Documents/GitHub/brevixai-acid/app/Services/**)"
+    ]
+  }
+}
