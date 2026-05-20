@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AuditCase;
 use App\Models\InvestigationActivityEvent;
 use Exception;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class InvestigationService
@@ -44,7 +45,7 @@ class InvestigationService
                 DB::raw("creator.first_name || ' ' || creator.last_name AS created_by_name"),
                 'cr.case_type',
                 'cr.confidence_score',
-                DB::raw("(SELECT COUNT(*) FROM investigation_activity_events iae WHERE iae.audit_case_id = ac.id) AS activity_count")
+                DB::raw('(SELECT COUNT(*) FROM investigation_activity_events iae WHERE iae.audit_case_id = ac.id) AS activity_count')
             );
 
         if (! empty($filters['investigation_status']) && $filters['investigation_status'] !== 'all') {
@@ -247,6 +248,23 @@ class InvestigationService
             'evidence_summary' => $evidenceSummary,
             'evidence_items' => $evidenceItems,
             'activity_timeline' => $activity,
+            'report_exports' => $this->getReportExports($companyId, $caseId),
+        ];
+    }
+
+    public function reportExports(string $companyId, string $caseId): ?array
+    {
+        $exists = DB::table('audit_cases')
+            ->where('id', $caseId)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (! $exists) {
+            return null;
+        }
+
+        return [
+            'report_exports' => $this->getReportExports($companyId, $caseId),
         ];
     }
 
@@ -426,5 +444,34 @@ class InvestigationService
             'evidence_domains' => array_keys($evidence),
             'evidence_domain_count' => count($evidence),
         ];
+    }
+
+    private function getReportExports(string $companyId, string $caseId): Collection
+    {
+        return DB::table('investigation_report_exports as ire')
+            ->leftJoin('users as generator', 'generator.id', '=', 'ire.generated_by_user_id')
+            ->where('ire.audit_case_id', $caseId)
+            ->where('ire.company_id', $companyId)
+            ->select(
+                'ire.id',
+                'ire.audit_case_id',
+                'ire.company_id',
+                'ire.generated_by_user_id',
+                DB::raw("generator.first_name || ' ' || generator.last_name AS generated_by_user_name"),
+                'ire.format',
+                'ire.filename',
+                'ire.report_hash',
+                'ire.generated_at',
+                'ire.metadata',
+            )
+            ->orderBy('ire.generated_at', 'desc')
+            ->get()
+            ->map(function (object $export): object {
+                $export->metadata = $export->metadata
+                    ? json_decode($export->metadata, true)
+                    : null;
+
+                return $export;
+            });
     }
 }

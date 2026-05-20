@@ -7,6 +7,7 @@ use App\Models\CaseRecommendation;
 use App\Models\Company;
 use App\Models\InvestigationActivityEvent;
 use App\Models\User;
+use App\Services\InvestigationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -368,7 +369,7 @@ class InvestigationWorkspaceTest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $investigationService = app(\App\Services\InvestigationService::class);
+        $investigationService = app(InvestigationService::class);
         $investigationService->recordActivity(
             caseId: $case->id,
             companyId: $company->id,
@@ -384,7 +385,7 @@ class InvestigationWorkspaceTest extends TestCase
             ],
         );
 
-        $event = \App\Models\InvestigationActivityEvent::where('audit_case_id', $case->id)->first();
+        $event = InvestigationActivityEvent::where('audit_case_id', $case->id)->first();
         $metadata = $event->event_metadata;
 
         $this->assertArrayHasKey('safe_field', $metadata);
@@ -425,13 +426,13 @@ class InvestigationWorkspaceTest extends TestCase
      */
     private function createCompanyUser(): array
     {
-        $company = new Company(['name' => 'Test Co ' . Str::random(4)]);
+        $company = new Company(['name' => 'Test Co '.Str::random(4)]);
         $company->id = (string) Str::uuid();
         $company->save();
 
         $user = new User([
             'company_id' => $company->id,
-            'email' => Str::uuid() . '@example.com',
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
             'first_name' => 'Test',
             'last_name' => 'User',
@@ -504,6 +505,7 @@ class InvestigationWorkspaceTest extends TestCase
     private function createSchema(): void
     {
         foreach ([
+            'investigation_report_exports',
             'investigation_evidence_items',
             'investigation_activity_events',
             'audit_case_events',
@@ -640,6 +642,18 @@ class InvestigationWorkspaceTest extends TestCase
             $table->text('event_summary');
             $table->json('event_metadata')->nullable();
             $table->timestamp('created_at')->useCurrent();
+        });
+
+        Schema::create('investigation_report_exports', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('audit_case_id');
+            $table->foreignUuid('company_id');
+            $table->foreignUuid('generated_by_user_id');
+            $table->text('format');
+            $table->text('filename')->nullable();
+            $table->text('report_hash');
+            $table->timestamp('generated_at')->useCurrent();
+            $table->json('metadata')->nullable();
         });
 
         Schema::create('investigation_evidence_items', function (Blueprint $table): void {

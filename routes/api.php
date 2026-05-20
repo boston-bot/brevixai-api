@@ -3,7 +3,6 @@
 use App\Http\Controllers\Api\AccountingController;
 use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AlertRecommendationController;
-use App\Http\Controllers\Api\InvestigationController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
@@ -14,6 +13,7 @@ use App\Http\Controllers\Api\ControlsController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\GnuCashController;
 use App\Http\Controllers\Api\IntegrationController;
+use App\Http\Controllers\Api\InvestigationController;
 use App\Http\Controllers\Api\ReconciliationController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TransactionController;
@@ -164,6 +164,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{id}/evidence', [InvestigationController::class, 'listEvidence']);
         Route::post('/{id}/evidence', [InvestigationController::class, 'addEvidence']);
         Route::delete('/{id}/evidence/{evidenceItemId}', [InvestigationController::class, 'removeEvidence']);
+        Route::get('/{id}/reports', [InvestigationController::class, 'reportExports']);
         Route::post('/{id}/reports', [InvestigationController::class, 'generateReport']);
     });
 

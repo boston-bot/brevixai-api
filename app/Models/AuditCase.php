@@ -76,6 +76,11 @@ class AuditCase extends Model
         return $this->hasMany(InvestigationActivityEvent::class, 'audit_case_id')->orderBy('created_at');
     }
 
+    public function investigationReportExports(): HasMany
+    {
+        return $this->hasMany(InvestigationReportExport::class, 'audit_case_id')->orderByDesc('generated_at');
+    }
+
     public function investigationAssignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'investigation_assigned_user_id');

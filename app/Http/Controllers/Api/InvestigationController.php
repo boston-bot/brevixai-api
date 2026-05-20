@@ -268,6 +268,24 @@ class InvestigationController extends Controller
     }
 
     /**
+     * GET /api/investigations/{id}/reports
+     */
+    public function reportExports(Request $request, string $id): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        $result = $this->investigationService->reportExports($companyId, $id);
+        if (! $result) {
+            return response()->json(['error' => 'Investigation not found'], 404);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
      * POST /api/investigations/{id}/reports
      *
      * Accepts format=json (default) or format=pdf.
@@ -289,18 +307,19 @@ class InvestigationController extends Controller
 
         try {
             if ($format === 'pdf') {
+                $filename = 'investigation-report-'.$id.'-'.now()->format('Y-m-d').'.pdf';
+
                 $pdfBytes = $this->reportService->generatePdf(
                     companyId: $companyId,
                     caseId: $id,
                     actorType: InvestigationActivityEvent::ACTOR_USER,
                     actorId: $request->user()->id,
+                    filename: $filename,
                 );
-
-                $filename = 'investigation-report-' . $id . '-' . now()->format('Y-m-d') . '.pdf';
 
                 return response($pdfBytes, 200, [
                     'Content-Type' => 'application/pdf',
-                    'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                    'Content-Disposition' => 'attachment; filename="'.$filename.'"',
                 ]);
             }
 

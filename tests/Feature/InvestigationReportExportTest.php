@@ -3,10 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\AuditCase;
-use App\Models\CaseRecommendation;
 use App\Models\Company;
 use App\Models\InvestigationActivityEvent;
 use App\Models\InvestigationEvidenceItem;
+use App\Models\InvestigationReportExport;
 use App\Models\User;
 use App\Services\InvestigationReportService;
 use Illuminate\Database\Schema\Blueprint;
@@ -242,6 +242,33 @@ class InvestigationReportExportTest extends TestCase
         ]);
     }
 
+    public function test_json_report_export_record_created(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", [
+            'format' => 'json',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('investigation_report_exports', [
+            'audit_case_id' => $case->id,
+            'company_id' => $company->id,
+            'generated_by_user_id' => $user->id,
+            'format' => InvestigationReportExport::FORMAT_JSON,
+            'filename' => null,
+        ]);
+
+        $export = InvestigationReportExport::where('audit_case_id', $case->id)->first();
+
+        $this->assertNotNull($export);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $export->report_hash);
+        $this->assertSame(0, $export->metadata['evidence_item_count']);
+        $this->assertSame(0, $export->metadata['activity_event_count']);
+    }
+
     // -------------------------------------------------------------------------
     // Agents cannot generate reports
     // -------------------------------------------------------------------------
@@ -263,6 +290,27 @@ class InvestigationReportExportTest extends TestCase
             actorType: InvestigationActivityEvent::ACTOR_AGENT,
             actorId: (string) Str::uuid(),
         );
+    }
+
+    public function test_agent_cannot_create_export_record(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+        $service = app(InvestigationReportService::class);
+
+        try {
+            $service->generate(
+                companyId: $company->id,
+                caseId: $case->id,
+                actorType: InvestigationActivityEvent::ACTOR_AGENT,
+                actorId: (string) Str::uuid(),
+            );
+            $this->fail('Agent report generation should be blocked.');
+        } catch (\Exception $e) {
+            $this->assertSame(403, $e->getCode());
+        }
+
+        $this->assertDatabaseCount('investigation_report_exports', 0);
     }
 
     // =========================================================================
@@ -427,6 +475,141 @@ class InvestigationReportExportTest extends TestCase
         $this->assertEquals('pdf', $event->event_metadata['format'] ?? null);
     }
 
+    public function test_pdf_report_export_record_created(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'pdf'])->assertOk();
+
+        $export = InvestigationReportExport::where('audit_case_id', $case->id)->first();
+
+        $this->assertNotNull($export);
+        $this->assertSame($company->id, $export->company_id);
+        $this->assertSame($user->id, $export->generated_by_user_id);
+        $this->assertSame(InvestigationReportExport::FORMAT_PDF, $export->format);
+        $this->assertStringStartsWith('investigation-report-'.$case->id, $export->filename);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $export->report_hash);
+    }
+
+    public function test_report_hash_is_stable_for_same_sanitized_payload(): void
+    {
+        $service = app(InvestigationReportService::class);
+
+        $payload = [
+            'case_summary' => [
+                'title' => 'Investigation A',
+                'severity' => 'warning',
+            ],
+            'evidence_items' => [
+                [
+                    'title' => 'Evidence one',
+                    'metadata' => ['risk_score' => 92, 'safe_label' => 'visible'],
+                ],
+            ],
+        ];
+
+        $samePayloadDifferentKeyOrder = [
+            'evidence_items' => [
+                [
+                    'metadata' => ['safe_label' => 'visible', 'risk_score' => 92],
+                    'title' => 'Evidence one',
+                ],
+            ],
+            'case_summary' => [
+                'severity' => 'warning',
+                'title' => 'Investigation A',
+            ],
+        ];
+
+        $this->assertSame(
+            $service->hashSanitizedReportPayload($payload),
+            $service->hashSanitizedReportPayload($samePayloadDifferentKeyOrder),
+        );
+    }
+
+    public function test_export_history_endpoint_works(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'json'])->assertOk();
+
+        $this->getJson("/api/investigations/{$case->id}/reports")
+            ->assertOk()
+            ->assertJsonCount(1, 'report_exports')
+            ->assertJsonPath('report_exports.0.audit_case_id', $case->id)
+            ->assertJsonPath('report_exports.0.generated_by_user_id', $user->id)
+            ->assertJsonPath('report_exports.0.format', InvestigationReportExport::FORMAT_JSON)
+            ->assertJsonMissingPath('report_exports.0.payload');
+    }
+
+    public function test_investigation_detail_includes_report_exports(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'json'])->assertOk();
+
+        $this->getJson("/api/investigations/{$case->id}")
+            ->assertOk()
+            ->assertJsonCount(1, 'report_exports')
+            ->assertJsonPath('report_exports.0.format', InvestigationReportExport::FORMAT_JSON);
+    }
+
+    public function test_report_export_history_unauthorized_access_blocked(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->getJson("/api/investigations/{$case->id}/reports")->assertUnauthorized();
+    }
+
+    public function test_report_export_history_cross_company_access_blocked(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        [$otherCompany, $otherUser] = $this->createCompanyUser();
+        $case = $this->createCase($otherCompany->id, $otherUser->id);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson("/api/investigations/{$case->id}/reports")->assertNotFound();
+    }
+
+    public function test_sensitive_metadata_excluded_from_export_record(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $case = $this->createCase($company->id, $user->id);
+
+        $this->createEvidenceItem($case->id, $company->id, [
+            'metadata' => [
+                'safe_label' => 'visible',
+                'raw_payload' => 'must-not-be-stored',
+                'transaction_details' => ['account' => 'secret-account'],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/investigations/{$case->id}/reports", ['format' => 'json'])->assertOk();
+
+        $export = InvestigationReportExport::where('audit_case_id', $case->id)->first();
+
+        $this->assertNotNull($export);
+        $encodedMetadata = json_encode($export->metadata);
+        $this->assertStringContainsString('evidence_item_count', $encodedMetadata);
+        $this->assertStringNotContainsString('must-not-be-stored', $encodedMetadata);
+        $this->assertStringNotContainsString('secret-account', $encodedMetadata);
+        $this->assertStringNotContainsString('raw_payload', $encodedMetadata);
+        $this->assertStringNotContainsString('transaction_details', $encodedMetadata);
+    }
+
     // -------------------------------------------------------------------------
     // Agents cannot generate PDF reports via service
     // -------------------------------------------------------------------------
@@ -459,13 +642,13 @@ class InvestigationReportExportTest extends TestCase
      */
     private function createCompanyUser(): array
     {
-        $company = new Company(['name' => 'Test Co ' . Str::random(4)]);
+        $company = new Company(['name' => 'Test Co '.Str::random(4)]);
         $company->id = (string) Str::uuid();
         $company->save();
 
         $user = new User([
             'company_id' => $company->id,
-            'email' => Str::uuid() . '@example.com',
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
             'first_name' => 'Test',
             'last_name' => 'User',
@@ -521,6 +704,7 @@ class InvestigationReportExportTest extends TestCase
     private function createSchema(): void
     {
         foreach ([
+            'investigation_report_exports',
             'investigation_evidence_items',
             'investigation_activity_events',
             'audit_case_events',
@@ -657,6 +841,18 @@ class InvestigationReportExportTest extends TestCase
             $table->text('event_summary');
             $table->json('event_metadata')->nullable();
             $table->timestamp('created_at')->useCurrent();
+        });
+
+        Schema::create('investigation_report_exports', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('audit_case_id');
+            $table->foreignUuid('company_id');
+            $table->foreignUuid('generated_by_user_id');
+            $table->text('format');
+            $table->text('filename')->nullable();
+            $table->text('report_hash');
+            $table->timestamp('generated_at')->useCurrent();
+            $table->json('metadata')->nullable();
         });
 
         Schema::create('investigation_evidence_items', function (Blueprint $table): void {

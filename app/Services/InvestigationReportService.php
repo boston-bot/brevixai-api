@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\InvestigationActivityEvent;
+use App\Models\InvestigationReportExport;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\CarbonInterface;
 use Exception;
 
 class InvestigationReportService
@@ -37,11 +39,34 @@ class InvestigationReportService
         ['sections' => $sections, 'evidenceCount' => $evidenceCount, 'eventCount' => $eventCount]
             = $this->buildReportSections($companyId, $caseId);
 
-        $this->recordReportActivity($caseId, $companyId, $actorType, $actorId, 'json', $evidenceCount, $eventCount);
+        $generatedAt = now();
+        $reportHash = $this->hashSanitizedReportPayload($sections);
+
+        $this->recordReportExport(
+            caseId: $caseId,
+            companyId: $companyId,
+            actorType: $actorType,
+            actorId: $actorId,
+            format: InvestigationReportExport::FORMAT_JSON,
+            filename: null,
+            reportHash: $reportHash,
+            generatedAt: $generatedAt,
+            metadata: $this->buildExportMetadata($evidenceCount, $eventCount),
+        );
+
+        $this->recordReportActivity(
+            $caseId,
+            $companyId,
+            $actorType,
+            $actorId,
+            InvestigationReportExport::FORMAT_JSON,
+            $evidenceCount,
+            $eventCount,
+        );
 
         return [
             'report' => array_merge($sections, [
-                'generated_at' => now()->toIso8601String(),
+                'generated_at' => $generatedAt->toIso8601String(),
                 'generated_by_user_id' => $actorId,
             ]),
         ];
@@ -56,20 +81,54 @@ class InvestigationReportService
         string $caseId,
         string $actorType,
         string $actorId,
+        ?string $filename = null,
     ): string {
         $this->assertNotAgent($actorType);
 
         ['sections' => $sections, 'evidenceCount' => $evidenceCount, 'eventCount' => $eventCount]
             = $this->buildReportSections($companyId, $caseId);
 
+        $generatedAt = now();
         $reportPayload = array_merge($sections, [
-            'generated_at' => now()->toIso8601String(),
+            'generated_at' => $generatedAt->toIso8601String(),
             'generated_by_user_id' => $actorId,
         ]);
 
-        $this->recordReportActivity($caseId, $companyId, $actorType, $actorId, 'pdf', $evidenceCount, $eventCount);
+        $pdfBytes = Pdf::loadView('reports.investigation-pdf', ['report' => $reportPayload])->output();
 
-        return Pdf::loadView('reports.investigation-pdf', ['report' => $reportPayload])->output();
+        $this->recordReportExport(
+            caseId: $caseId,
+            companyId: $companyId,
+            actorType: $actorType,
+            actorId: $actorId,
+            format: InvestigationReportExport::FORMAT_PDF,
+            filename: $filename,
+            reportHash: $this->hashSanitizedReportPayload($sections),
+            generatedAt: $generatedAt,
+            metadata: $this->buildExportMetadata($evidenceCount, $eventCount),
+        );
+
+        $this->recordReportActivity(
+            $caseId,
+            $companyId,
+            $actorType,
+            $actorId,
+            InvestigationReportExport::FORMAT_PDF,
+            $evidenceCount,
+            $eventCount,
+        );
+
+        return $pdfBytes;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function hashSanitizedReportPayload(array $payload): string
+    {
+        $canonicalPayload = $this->canonicalizeForHash($payload);
+
+        return hash('sha256', json_encode($canonicalPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
     /**
@@ -169,11 +228,54 @@ class InvestigationReportService
         );
     }
 
+    /**
+     * @param  array<string, mixed>|null  $metadata
+     */
+    private function recordReportExport(
+        string $caseId,
+        string $companyId,
+        string $actorType,
+        string $actorId,
+        string $format,
+        ?string $filename,
+        string $reportHash,
+        CarbonInterface $generatedAt,
+        ?array $metadata,
+    ): InvestigationReportExport {
+        $this->assertNotAgent($actorType);
+
+        if ($actorType !== InvestigationActivityEvent::ACTOR_USER) {
+            throw new Exception('Only users can create investigation report export records', 403);
+        }
+
+        return InvestigationReportExport::create([
+            'audit_case_id' => $caseId,
+            'company_id' => $companyId,
+            'generated_by_user_id' => $actorId,
+            'format' => $format,
+            'filename' => $filename,
+            'report_hash' => $reportHash,
+            'generated_at' => $generatedAt,
+            'metadata' => $metadata !== null ? $this->sanitizeMetadata($metadata) : null,
+        ]);
+    }
+
     private function assertNotAgent(string $actorType): void
     {
         if ($actorType === InvestigationActivityEvent::ACTOR_AGENT) {
             throw new Exception('Agents cannot generate investigation reports', 403);
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildExportMetadata(int $evidenceCount, int $eventCount): array
+    {
+        return [
+            'evidence_item_count' => $evidenceCount,
+            'activity_event_count' => $eventCount,
+        ];
     }
 
     private function buildRiskSummary(?array $recommendation, mixed $linkedAlerts): array
@@ -229,5 +331,24 @@ class InvestigationReportService
         }
 
         return $sanitized;
+    }
+
+    private function canonicalizeForHash(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if (array_is_list($value)) {
+            return array_map(fn (mixed $item): mixed => $this->canonicalizeForHash($item), $value);
+        }
+
+        ksort($value);
+
+        foreach ($value as $key => $item) {
+            $value[$key] = $this->canonicalizeForHash($item);
+        }
+
+        return $value;
     }
 }
