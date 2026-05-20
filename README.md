@@ -9,6 +9,7 @@
 
 ## Project Documentation
 
+- [Deployment Readiness](docs/deployment-readiness.md) — Migrations, environment variables, storage/PDF setup, queue/scheduler, smoke check command, and rollback procedure
 - [Investigation Workspace](docs/investigation-workspace.md) — Investigation lifecycle, evidence ledger, report export, package manifest, API reference, and deployment checklist
 
 ---
