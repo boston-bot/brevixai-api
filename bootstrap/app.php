@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'agent.tool' => \App\Http\Middleware\AuthenticateAgentTool::class,
+            'personal.finance.local' => \App\Http\Middleware\EnsurePersonalFinanceLocalEnabled::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

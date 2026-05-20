@@ -16,6 +16,8 @@
 /public/build
 /public/hot
 /public/storage
+/storage/personal/
+/storage/app/private/personal-finance/
 /storage/*.key
 /storage/pail
 /vendor

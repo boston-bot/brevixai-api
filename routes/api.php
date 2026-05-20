@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\GnuCashController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\InvestigationController;
+use App\Http\Controllers\Api\PersonalFinanceController;
 use App\Http\Controllers\Api\ReconciliationController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TransactionController;
@@ -45,6 +46,24 @@ Route::prefix('internal/agent-tools')
     });
 
 Route::middleware('auth:sanctum')->group(function () {
+    if (app()->environment(config('personal_finance.route_environments', ['local']))) {
+        Route::prefix('local/personal-finance')
+            ->middleware('personal.finance.local')
+            ->group(function () {
+                Route::get('/status', [PersonalFinanceController::class, 'status']);
+                Route::post('/imports/run', [PersonalFinanceController::class, 'runImport']);
+                Route::get('/transactions', [PersonalFinanceController::class, 'transactions']);
+                Route::patch('/transactions/{id}', [PersonalFinanceController::class, 'updateTransaction']);
+                Route::get('/analysis/summary', [PersonalFinanceController::class, 'summary']);
+                Route::post('/analysis/catch-up', [PersonalFinanceController::class, 'catchUp']);
+                Route::get('/rules', [PersonalFinanceController::class, 'rules']);
+                Route::put('/rules', [PersonalFinanceController::class, 'updateRules']);
+                Route::get('/budgets', [PersonalFinanceController::class, 'budgets']);
+                Route::put('/budgets', [PersonalFinanceController::class, 'updateBudgets']);
+                Route::post('/exports', [PersonalFinanceController::class, 'export']);
+            });
+    }
+
     // Protected Auth Routes
     Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
