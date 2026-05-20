@@ -237,6 +237,11 @@ class ChaseStatementParser
 
         foreach (self::OUTFLOW_SECTIONS as $needle) {
             if (str_contains($sectionLower, $needle)) {
+                // Even if section says outflow, check if the description is clearly income
+                if ($this->looksLikeInflow($description)) {
+                    return 'inflow';
+                }
+
                 return 'outflow';
             }
         }
@@ -247,7 +252,28 @@ class ChaseStatementParser
             }
         }
 
-        return preg_match('/payroll|direct dep|deposit|ach credit/i', $description) ? 'inflow' : 'outflow';
+        // Fallback: use description patterns to detect inflows even when section is ambiguous
+        return $this->looksLikeInflow($description) ? 'inflow' : 'outflow';
+    }
+
+    /**
+     * Detect income/deposit transactions from their description text.
+     * This is the primary mechanism since PDF section headings are often unreliable.
+     */
+    private function looksLikeInflow(string $description): bool
+    {
+        return (bool) preg_match(
+            '/PAYROLL|DIRECT DEP|DEPOSIT|ACH CREDIT|FED SAL|SALARY'
+            .'|INTEREST PAYMENT'
+            .'|VENMO CASHOUT'
+            .'|ZELLE.*FROM'
+            .'|TAX REF|IRS.*TREAS.*REF'
+            .'|REAL TIME TRANSFER RECD'
+            .'|PAYMENT RECEIVED'
+            .'|APPLE CASH INST XFER'
+            .'|EBAY.*SELLER/i',
+            $description
+        );
     }
 
     private function parseMoney(string $value): float

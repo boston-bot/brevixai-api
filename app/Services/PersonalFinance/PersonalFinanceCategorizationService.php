@@ -9,19 +9,62 @@ use Illuminate\Support\Collection;
 class PersonalFinanceCategorizationService
 {
     private const DEFAULT_RULES = [
-        ['rule_type' => 'income_source', 'name' => 'Payroll and direct deposit income', 'pattern' => 'PAYROLL|DIRECT DEP|DIRECT DEPOSIT|ACH CREDIT|PPD ID|SALARY', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 10, 'metadata' => ['category' => 'income']],
-        ['rule_type' => 'exclusion', 'name' => 'Internal transfers', 'pattern' => 'TRANSFER TO|TRANSFER FROM|ONLINE TRANSFER|EXTERNAL TRANSFER|SAVINGS TRANSFER', 'target_value' => 'transfer', 'priority' => 20, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_EXCLUDED]],
-        ['rule_type' => 'category', 'name' => 'Opaque credit card payments', 'pattern' => 'CHASE CREDIT CRD|CARDMEMBER|AMEX|AMERICAN EXPRESS|CITI CARD|CAPITAL ONE|DISCOVER E-PAY|BARCLAYS|SYNCHRONY', 'target_value' => 'credit_card_payment', 'priority' => 30, 'metadata' => ['adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Housing', 'pattern' => 'MORTGAGE|RENT|APARTMENT|PROPERTY MGMT|PROPERTY MANAGEMENT|HOA', 'target_value' => 'housing', 'priority' => 40, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_SHARED, 'adjustable' => false]],
-        ['rule_type' => 'category', 'name' => 'Groceries', 'pattern' => 'KROGER|ALDI|WHOLE FOODS|WHOLEFDS|TRADER JOE|COSTCO|SAM.?S CLUB|WALMART|TARGET|MEIJER|PUBLIX|GROCERY', 'target_value' => 'groceries', 'priority' => 50, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_SHARED, 'adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Dining', 'pattern' => 'RESTAURANT|MCDONALD|STARBUCKS|CHICK-FIL-A|CHICK FIL A|TACO|PIZZA|DOORDASH|UBER EATS|GRUBHUB|CAFE|DINING', 'target_value' => 'dining', 'priority' => 60, 'metadata' => ['adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Utilities and telecom', 'pattern' => 'ELECTRIC|WATER|GAS BILL|UTILITY|COMCAST|XFINITY|AT&T|ATT\\*|VERIZON|T-MOBILE|TMOBILE|INTERNET', 'target_value' => 'utilities', 'priority' => 70, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_SHARED, 'adjustable' => false]],
-        ['rule_type' => 'category', 'name' => 'Subscriptions and software', 'pattern' => 'NETFLIX|SPOTIFY|APPLE.COM/BILL|GOOGLE\\*|AMAZON PRIME|HULU|DISNEY|OPENAI|ADOBE|MICROSOFT|ICLOUD|PATREON', 'target_value' => 'subscriptions', 'priority' => 80, 'metadata' => ['adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Transportation', 'pattern' => 'SHELL|BP#|BP |EXXON|CHEVRON|MOBIL|UBER|LYFT|PARKING|TOLL|FUEL|GAS STATION', 'target_value' => 'transportation', 'priority' => 90, 'metadata' => ['adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Healthcare', 'pattern' => 'PHARMACY|CVS|WALGREENS|DOCTOR|DENTAL|MEDICAL|HOSPITAL|INSURANCE|HEALTH', 'target_value' => 'healthcare', 'priority' => 100, 'metadata' => ['adjustable' => false]],
-        ['rule_type' => 'category', 'name' => 'Shopping', 'pattern' => 'AMAZON|ETSY|EBAY|BEST BUY|HOME DEPOT|LOWE.?S|SHOP|STORE', 'target_value' => 'shopping', 'priority' => 110, 'metadata' => ['adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Cash and ATM', 'pattern' => 'ATM WITHDRAWAL|CASH WITHDRAWAL|NON-CHASE ATM', 'target_value' => 'cash_atm', 'priority' => 120, 'metadata' => ['adjustable' => true]],
-        ['rule_type' => 'category', 'name' => 'Bank fees', 'pattern' => 'MONTHLY SERVICE FEE|OVERDRAFT|RETURNED ITEM|NON-CHASE ATM FEE|FEE', 'target_value' => 'fees', 'priority' => 130, 'metadata' => ['adjustable' => true]],
+        // ── Income detection (priority 5–15) ────────────────────────────
+        ['rule_type' => 'income_source', 'name' => 'Federal government salary', 'pattern' => 'AGRI TREAS.*FED SAL|TREAS.*FED SAL|FED SALARY', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 5, 'metadata' => ['category' => 'income']],
+        ['rule_type' => 'income_source', 'name' => 'Employer payroll', 'pattern' => 'RESERVE COMMUNIC.*PAYROLL|PAYROLL|DIRECT DEP|DIRECT DEPOSIT|SALARY', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 6, 'metadata' => ['category' => 'income']],
+        ['rule_type' => 'income_source', 'name' => 'Mobile check deposit', 'pattern' => 'REMOTE.*DEPOSIT|MOBILE DEPOSIT', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 7, 'metadata' => ['category' => 'income']],
+        ['rule_type' => 'income_source', 'name' => 'Other deposits', 'pattern' => 'DEPOSIT\s+\d|ACH CREDIT', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 8, 'metadata' => ['category' => 'income']],
+        ['rule_type' => 'income_source', 'name' => 'Interest income', 'pattern' => '^INTEREST\s+PAYMENT$|INTEREST PAYMENT', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 9, 'metadata' => ['category' => 'income']],
+        ['rule_type' => 'income_source', 'name' => 'Venmo and cashout income', 'pattern' => 'VENMO CASHOUT', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 10, 'metadata' => ['category' => 'income']],
+        ['rule_type' => 'income_source', 'name' => 'Real-time transfer received', 'pattern' => 'REAL TIME TRANSFER RECD|PAYMENT RECEIVED|APPLE CASH INST XFER', 'target_value' => PersonalFinanceTransaction::PERSON_UNKNOWN, 'priority' => 11, 'metadata' => ['category' => 'income']],
+
+        // ── Exclusions (priority 20–25) ──────────────────────────────────
+        ['rule_type' => 'exclusion', 'name' => 'Internal transfers', 'pattern' => 'TRANSFER TO CHK|TRANSFER FROM CHK|ONLINE TRANSFER FROM|ONLINE TRANSFER TO|EXTERNAL TRANSFER|SAVINGS TRANSFER', 'target_value' => 'transfer', 'priority' => 20, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_EXCLUDED]],
+
+        // ── Investments (new category, priority 28) ─────────────────────
+        ['rule_type' => 'category', 'name' => 'Investments', 'pattern' => 'VANGUARD|FUNDRISE|ACORNS|FIDELITY|SCHWAB|BETTERMENT|WEALTHFRONT|ROBINHOOD', 'target_value' => 'investment', 'priority' => 28, 'metadata' => ['adjustable' => true]],
+
+        // ── Debt payments (new category, priority 29) ───────────────────
+        ['rule_type' => 'category', 'name' => 'Debt and loan payments', 'pattern' => 'AFFIRM.*PAY|AFFIRM\.COM|GOLDMAN SACHS.*COLLECTION|SOFI BANK.*PL|PENTAGON FEDERAL|ADVS ED SERV|STUDNTLOAN|FNB RIVER FALLS|MBFS.*PAY|REV LETSREV|CHECK\s+#', 'target_value' => 'debt_payment', 'priority' => 29, 'metadata' => ['adjustable' => true]],
+
+        // ── Credit card payments (priority 30) ──────────────────────────
+        ['rule_type' => 'category', 'name' => 'Credit card payments', 'pattern' => 'CHASE CREDIT CRD|CARDMEMBER|AMEX EPAYMENT|AMERICAN EXPRESS|CITI CARD|CAPITAL ONE|DISCOVER E-PAY|BARCLAYS|SYNCHRONY|BK OF AMER.*MC.*PMT|BK OF AMER.*ONLINE PMT', 'target_value' => 'credit_card_payment', 'priority' => 30, 'metadata' => ['adjustable' => true]],
+
+        // ── Housing (priority 35) ───────────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Housing', 'pattern' => 'PENNYMAC|NSM DBAMR.COOPER|MR\.?COOPER|MORTGAGE|RENT|APARTMENT|PROPERTY MGMT|PROPERTY MANAGEMENT|HOA|DELAUNE ESTATES', 'target_value' => 'housing', 'priority' => 35, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_SHARED, 'adjustable' => false]],
+
+        // ── Utilities and telecom (priority 40) ─────────────────────────
+        ['rule_type' => 'category', 'name' => 'Utilities and telecom', 'pattern' => 'CITY OF.*UTILI|ENTERGY|ATMOS ENERGY|CLECO|ELECTRIC|WATER BILL|GAS BILL|UTILITY|COMCAST|XFINITY|AT&T|ATT\\*|VERIZON|T-MOBILE|TMOBILE|INTERNET|ACI.*ENTERGY', 'target_value' => 'utilities', 'priority' => 40, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_SHARED, 'adjustable' => false]],
+
+        // ── Groceries (priority 50) ─────────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Groceries', 'pattern' => 'ROUSES|LAMENDOLA|KROGER|ALDI|WHOLE FOODS|WHOLEFDS|TRADER JOE|COSTCO|SAM.?S CLUB|WALMART|WAL-MART|WM SUPERCENTER|TARGET|MEIJER|PUBLIX|GROCERY|ALEXANDER.?S\s+(HERITAGE|HARVEST|HIGHLAND)', 'target_value' => 'groceries', 'priority' => 50, 'metadata' => ['person_scope' => PersonalFinanceTransaction::PERSON_SHARED, 'adjustable' => true]],
+
+        // ── Dining (priority 60) ────────────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Dining', 'pattern' => 'NAVARRE|NOLA MIA|EL PASO OF|MIKE ANDERSON|TST\s|TAILS\s|ARMK LSU|RESTAURANT|MCDONALD|STARBUCKS|CHICK.?FIL.?A|TACO|PIZZA|DOORDASH|UBER EATS|GRUBHUB|CAFE|DINING|SEAFOOD|WAFFLE|POPEYE|RAISIN.?CANES|ZAXBY|SONIC|WENDY|SUBWAY|FIREHOUSE|JIMMY JOHN|PANERA|CHIPOTLE|WING|SMOOTHIE|JUICE|BOBA|PASTRIES', 'target_value' => 'dining', 'priority' => 60, 'metadata' => ['adjustable' => true]],
+
+        // ── Subscriptions and software (priority 70) ────────────────────
+        ['rule_type' => 'category', 'name' => 'Subscriptions and software', 'pattern' => 'NETFLIX|SPOTIFY|APPLE\.COM/BILL|GOOGLE\\*|AMAZON PRIME|HULU|DISNEY|OPENAI|ADOBE|MICROSOFT|ICLOUD|PATREON|PARAMOUNT|PARAMNTPLUS|PAYPAL\s*\*NETFLIX|PP\*APPLE|YOUTUBE|HBO|PEACOCK|CHATGPT', 'target_value' => 'subscriptions', 'priority' => 70, 'metadata' => ['adjustable' => true]],
+
+        // ── Donations and charity (new category, priority 75) ───────────
+        ['rule_type' => 'category', 'name' => 'Donations and charity', 'pattern' => 'SHRINERSHOS|ALSACSTJUDE|ST\.?\s*JUDE|FOLDS\s*HONOR|AARP|CHARITY|DONATION|UNITED WAY|RED CROSS|SALVATION ARMY|GOODWILL', 'target_value' => 'donations', 'priority' => 75, 'metadata' => ['adjustable' => true]],
+
+        // ── Transportation (priority 80) ────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Transportation', 'pattern' => 'MURPHY EXPRESS|CIRCLE K|RACETRAC|SHELL|BP#|BP\s|EXXON|CHEVRON|MOBIL|UBER\s|LYFT|PARKING|TOLL|FUEL|GAS STATION|TEXACO|VALERO|MARATHON|CASEY|PILOT|LOVES\s|BUCCEE|QT\s', 'target_value' => 'transportation', 'priority' => 80, 'metadata' => ['adjustable' => true]],
+
+        // ── Healthcare (priority 85) ────────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Healthcare', 'pattern' => 'BRGMC|PHARMACY|CVS|WALGREENS|DOCTOR|DENTAL|MEDICAL|HOSPITAL|INSURANCE|HEALTH|CLINIC|URGENT|LABCORP|QUEST DIAG', 'target_value' => 'healthcare', 'priority' => 85, 'metadata' => ['adjustable' => false]],
+
+        // ── Peer-to-peer payments (priority 88) ─────────────────────────
+        ['rule_type' => 'category', 'name' => 'Peer-to-peer payments', 'pattern' => 'VENMO\s+PAYMENT|ZELLE\s+PAYMENT\s+TO|ZELLE\s+TO|CASHAPP|APPLE\s+CASH', 'target_value' => 'p2p_payment', 'priority' => 88, 'metadata' => ['adjustable' => true]],
+
+        // ── Shopping (priority 90) ──────────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Shopping', 'pattern' => 'AMAZON|TEMU|SHEIN|ETSY|EBAY|BEST BUY|HOME DEPOT|LOWE.?S|HOBBYLOBBY|HOBBY LOBBY|PETCO|PETSMART|DOLLAR GENERAL|DOLLAR TREE|FIVE BELOW|BARNESNOBLE|BARNES.?NOBLE|TOTAL WINE|LOUISIANA NURSER|BATH.?BODY', 'target_value' => 'shopping', 'priority' => 90, 'metadata' => ['adjustable' => true]],
+
+        // ── Cash and ATM (priority 100) ─────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Cash and ATM', 'pattern' => 'ATM WITHDRAWAL|CASH WITHDRAWAL|NON-CHASE ATM', 'target_value' => 'cash_atm', 'priority' => 100, 'metadata' => ['adjustable' => true]],
+
+        // ── Bank fees (priority 110) ────────────────────────────────────
+        ['rule_type' => 'category', 'name' => 'Bank fees', 'pattern' => 'MONTHLY SERVICE FEE|OVERDRAFT|RETURNED ITEM|NON-CHASE ATM FEE|SERVICE CHARGE', 'target_value' => 'fees', 'priority' => 110, 'metadata' => ['adjustable' => true]],
     ];
 
     public function ensureDefaultRules(string $companyId): void
