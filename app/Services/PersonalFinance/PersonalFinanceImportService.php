@@ -28,7 +28,8 @@ class PersonalFinanceImportService
 
         return [
             'enabled' => (bool) config('personal_finance.enabled'),
-            'localOnly' => true,
+            'localOnly' => $this->pdfExtractionService->statementDisk() === 'local',
+            'statementSource' => $this->statementSource(),
             'statementDirectory' => basename($this->pdfExtractionService->statementDirectory()),
             'pdfCount' => count($files),
             'importedStatementCount' => PersonalFinanceStatementImport::where('company_id', $companyId)->count(),
@@ -71,8 +72,8 @@ class PersonalFinanceImportService
 
         foreach ($this->pdfExtractionService->listStatementFiles() as $path) {
             $results['processed']++;
-            $filename = basename($path);
-            $sha256 = hash_file('sha256', $path);
+            $filename = $this->pdfExtractionService->filename($path);
+            $sha256 = $this->pdfExtractionService->sha256($path);
 
             $existing = PersonalFinanceStatementImport::where('company_id', $companyId)
                 ->where('sha256', $sha256)
@@ -109,7 +110,7 @@ class PersonalFinanceImportService
                     'company_id' => $companyId,
                     'imported_by_user_id' => $userId,
                     'source_filename' => $filename,
-                    'source_path' => $path,
+                    'source_path' => $this->pdfExtractionService->sourceUri($path),
                     'sha256' => $sha256,
                 ]);
 
@@ -154,8 +155,8 @@ class PersonalFinanceImportService
             $statement->fill([
                 'company_id' => $companyId,
                 'imported_by_user_id' => $userId,
-                'source_filename' => basename($path),
-                'source_path' => $path,
+                'source_filename' => $this->pdfExtractionService->filename($path),
+                'source_path' => $this->pdfExtractionService->sourceUri($path),
                 'sha256' => $sha256,
                 'statement_date' => $parsed['statement_date'],
                 'period_start' => $parsed['period_start'],
@@ -232,5 +233,18 @@ class PersonalFinanceImportService
                 'metadata' => [],
             ],
         );
+    }
+
+    private function statementSource(): string
+    {
+        if ($this->pdfExtractionService->statementDisk() === 'local') {
+            return basename($this->pdfExtractionService->statementDirectory());
+        }
+
+        $prefix = $this->pdfExtractionService->statementPrefix();
+
+        return $prefix === ''
+            ? $this->pdfExtractionService->statementDisk()
+            : $this->pdfExtractionService->statementDisk().':'.$prefix;
     }
 }

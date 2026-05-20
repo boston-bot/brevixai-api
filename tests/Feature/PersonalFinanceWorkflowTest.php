@@ -14,6 +14,7 @@ use App\Services\PersonalFinance\PersonalFinancePdfExtractionService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -26,7 +27,7 @@ class PersonalFinanceWorkflowTest extends TestCase
 
         $this->createSchema();
         config()->set('personal_finance.enabled', true);
-        config()->set('personal_finance.route_environments', ['testing']);
+        config()->set('personal_finance.route_environments', ['local', 'testing']);
         config()->set('personal_finance.export_path', sys_get_temp_dir().'/brevix-pf-exports');
     }
 
@@ -84,11 +85,14 @@ class PersonalFinanceWorkflowTest extends TestCase
         $this->assertSame(8000.0, $summary['totals']['income']);
         $this->assertSame(10200.0, $summary['totals']['outflow']);
         $this->assertSame(1100.0, $summary['totals']['averageMonthlyDeficit']);
+        $this->assertSame(1283.33, $summary['totals']['requiredMonthlyCatchUp']);
         $this->assertContains('Credit card payments are a major outflow but are opaque in checking-account statements. Import card statements later for better category detail.', $summary['warnings']);
 
         $scenario = $analytics->catchUpScenario($company->id, 2400, 6);
 
         $this->assertSame(1500.0, $scenario['requiredMonthlySwing']);
+        $this->assertSame(1500.0, $scenario['monthlyRequired']);
+        $this->assertSame(345.22, $scenario['weeklyRequired']);
         $this->assertNotEmpty($scenario['suggestedCuts']);
     }
 
@@ -99,6 +103,48 @@ class PersonalFinanceWorkflowTest extends TestCase
         config()->set('personal_finance.enabled', false);
 
         $this->getJson('/api/local/personal-finance/status')->assertNotFound();
+        $this->getJson('/api/admin/personal-finance/status')->assertNotFound();
+    }
+
+    public function test_admin_api_requires_admin_user(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/admin/personal-finance/status')->assertForbidden();
+
+        $user->forceFill(['role' => 'admin'])->save();
+        Sanctum::actingAs($user->refresh());
+
+        $this->getJson('/api/admin/personal-finance/status')
+            ->assertOk()
+            ->assertJsonPath('enabled', true);
+    }
+
+    public function test_import_can_read_statement_files_from_storage_disk(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        Storage::fake('s3');
+        Storage::disk('s3')->put('personal-finance/20260131-statements-0059-.pdf', 'fake pdf bytes');
+        config()->set('personal_finance.statement_disk', 's3');
+        config()->set('personal_finance.statement_prefix', 'personal-finance');
+        config()->set('filesystems.disks.s3.bucket', 'brevix-s3-bucket-1');
+
+        $path = 'personal-finance/20260131-statements-0059-.pdf';
+        $this->app->instance(
+            PersonalFinancePdfExtractionService::class,
+            new FakePersonalFinancePdfExtractionService([$path], $this->statementText(), 's3', 'personal-finance')
+        );
+
+        $service = $this->app->make(PersonalFinanceImportService::class);
+        $run = $service->run($company->id, $user->id);
+
+        $this->assertSame(1, $run['imported']);
+        $this->assertDatabaseHas('personal_finance_statement_imports', [
+            'company_id' => $company->id,
+            'source_filename' => '20260131-statements-0059-.pdf',
+            'source_path' => 's3://brevix-s3-bucket-1/personal-finance/20260131-statements-0059-.pdf',
+        ]);
     }
 
     public function test_api_status_transactions_budget_and_export_endpoints(): void
@@ -126,6 +172,17 @@ class PersonalFinanceWorkflowTest extends TestCase
             ->assertOk()
             ->assertJsonPath('budgetProfile.personALabel', 'Person One')
             ->assertJsonPath('budgetProfile.personAMonthlyAllowance', 300);
+
+        $this->patchJson("/api/local/personal-finance/transactions/{$transaction->id}", [
+            'personScope' => 'Person One',
+        ])
+            ->assertOk()
+            ->assertJsonPath('personScope', PersonalFinanceTransaction::PERSON_A);
+
+        $this->getJson('/api/local/personal-finance/transactions?category=DIN&person=Person%20One&perPage=1')
+            ->assertOk()
+            ->assertJsonPath('meta.perPage', 1)
+            ->assertJsonPath('meta.total', 1);
 
         $this->postJson('/api/local/personal-finance/exports', [
             'format' => 'pdf',
@@ -382,11 +439,31 @@ class FakePersonalFinancePdfExtractionService extends PersonalFinancePdfExtracti
     /**
      * @param  array<int, string>  $files
      */
-    public function __construct(private readonly array $files, private readonly string $text) {}
+    public function __construct(
+        private readonly array $files,
+        private readonly string $text,
+        private readonly string $disk = 'local',
+        private readonly string $prefix = '',
+    ) {}
+
+    public function statementDisk(): string
+    {
+        return $this->disk;
+    }
+
+    public function statementPrefix(): string
+    {
+        return $this->prefix;
+    }
 
     public function listStatementFiles(): array
     {
         return $this->files;
+    }
+
+    public function sha256(string $path): string
+    {
+        return hash('sha256', $path);
     }
 
     public function extractText(string $path): string

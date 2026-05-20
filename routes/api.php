@@ -23,6 +23,20 @@ use App\Http\Controllers\Chat\AgentChatController;
 use App\Http\Controllers\Internal\AgentToolController;
 use Illuminate\Support\Facades\Route;
 
+$personalFinanceRoutes = function (): void {
+    Route::get('/status', [PersonalFinanceController::class, 'status']);
+    Route::post('/imports/run', [PersonalFinanceController::class, 'runImport']);
+    Route::get('/transactions', [PersonalFinanceController::class, 'transactions']);
+    Route::patch('/transactions/{id}', [PersonalFinanceController::class, 'updateTransaction']);
+    Route::get('/analysis/summary', [PersonalFinanceController::class, 'summary']);
+    Route::post('/analysis/catch-up', [PersonalFinanceController::class, 'catchUp']);
+    Route::get('/rules', [PersonalFinanceController::class, 'rules']);
+    Route::put('/rules', [PersonalFinanceController::class, 'updateRules']);
+    Route::get('/budgets', [PersonalFinanceController::class, 'budgets']);
+    Route::put('/budgets', [PersonalFinanceController::class, 'updateBudgets']);
+    Route::post('/exports', [PersonalFinanceController::class, 'export']);
+};
+
 // Public Auth Routes
 Route::prefix('auth')->group(function () {
     Route::post('/signup', [AuthController::class, 'signup']);
@@ -45,24 +59,14 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/case-recommendations', [AgentToolController::class, 'caseRecommendations']);
     });
 
-Route::middleware('auth:sanctum')->group(function () {
-    if (app()->environment(config('personal_finance.route_environments', ['local']))) {
-        Route::prefix('local/personal-finance')
-            ->middleware('personal.finance.local')
-            ->group(function () {
-                Route::get('/status', [PersonalFinanceController::class, 'status']);
-                Route::post('/imports/run', [PersonalFinanceController::class, 'runImport']);
-                Route::get('/transactions', [PersonalFinanceController::class, 'transactions']);
-                Route::patch('/transactions/{id}', [PersonalFinanceController::class, 'updateTransaction']);
-                Route::get('/analysis/summary', [PersonalFinanceController::class, 'summary']);
-                Route::post('/analysis/catch-up', [PersonalFinanceController::class, 'catchUp']);
-                Route::get('/rules', [PersonalFinanceController::class, 'rules']);
-                Route::put('/rules', [PersonalFinanceController::class, 'updateRules']);
-                Route::get('/budgets', [PersonalFinanceController::class, 'budgets']);
-                Route::put('/budgets', [PersonalFinanceController::class, 'updateBudgets']);
-                Route::post('/exports', [PersonalFinanceController::class, 'export']);
-            });
-    }
+Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
+    Route::prefix('local/personal-finance')
+        ->middleware('personal.finance.local')
+        ->group($personalFinanceRoutes);
+
+    Route::prefix('admin/personal-finance')
+        ->middleware(['personal.finance.enabled', 'admin'])
+        ->group($personalFinanceRoutes);
 
     // Protected Auth Routes
     Route::prefix('auth')->group(function () {

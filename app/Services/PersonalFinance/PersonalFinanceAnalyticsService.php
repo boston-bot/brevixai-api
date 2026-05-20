@@ -38,6 +38,7 @@ class PersonalFinanceAnalyticsService
         $averageMonthlyDeficit = round(collect($monthlyTrend)->avg(fn (array $month): float => $month['outflow'] - $month['income']) ?? 0, 2);
         $averageMonthlyOutflow = round($outflow / $monthCount, 2);
         $cumulativeDeficit = round(max(0, $outflow - $income), 2);
+        $requiredMonthlyCatchUp = round(max(0, $averageMonthlyDeficit) + ($cumulativeDeficit / 12), 2);
         $budgetProfile = $this->budgetProfile($companyId);
         $warnings = $this->warnings($outflows, $outflow);
 
@@ -56,6 +57,7 @@ class PersonalFinanceAnalyticsService
                 'averageMonthlyOutflow' => $averageMonthlyOutflow,
                 'averageMonthlyDeficit' => $averageMonthlyDeficit,
                 'cumulativeDeficit' => $cumulativeDeficit,
+                'requiredMonthlyCatchUp' => $requiredMonthlyCatchUp,
             ],
             'monthlyTrend' => $monthlyTrend,
             'topCategories' => $this->topCategories($companyId, $outflows),
@@ -84,6 +86,8 @@ class PersonalFinanceAnalyticsService
             'targetAmount' => round((float) $deficitToRecover, 2),
             'averageMonthlyDeficit' => round($averageMonthlyDeficit, 2),
             'requiredMonthlySwing' => $requiredMonthlySwing,
+            'monthlyRequired' => $requiredMonthlySwing,
+            'weeklyRequired' => round($requiredMonthlySwing / 4.345, 2),
             'suggestedCuts' => $this->suggestedCuts($summary, $requiredMonthlySwing),
             'note' => 'This is cash-flow analysis for the Chase account only. Credit card payments are opaque unless card statements are imported separately.',
         ];
@@ -99,12 +103,44 @@ class PersonalFinanceAnalyticsService
             ->where('company_id', $companyId)
             ->when($filters['from'] ?? null, fn (Builder $query, string $from): Builder => $query->whereDate('posted_date', '>=', $from))
             ->when($filters['to'] ?? null, fn (Builder $query, string $to): Builder => $query->whereDate('posted_date', '<=', $to))
-            ->when($filters['category'] ?? null, fn (Builder $query, string $category): Builder => $query->where('category', $category))
-            ->when($filters['person'] ?? null, fn (Builder $query, string $person): Builder => $query->where('person_scope', $person))
+            ->when($filters['category'] ?? null, function (Builder $query, string $category): Builder {
+                return $query->whereRaw('LOWER(category) LIKE ?', ['%'.strtolower($category).'%']);
+            })
+            ->when($filters['person'] ?? null, function (Builder $query, string $person) use ($companyId): Builder {
+                return $query->where('person_scope', $this->normalizePersonScope($companyId, $person));
+            })
             ->when($filters['direction'] ?? null, fn (Builder $query, string $direction): Builder => $query->where('direction', $direction))
             ->when($filters['merchant'] ?? null, function (Builder $query, string $merchant): Builder {
                 return $query->whereRaw('LOWER(normalized_merchant) LIKE ?', ['%'.strtolower($merchant).'%']);
             });
+    }
+
+    private function normalizePersonScope(string $companyId, string $person): string
+    {
+        $normalized = strtolower(trim($person));
+        $normalized = str_replace([' ', '-'], '_', $normalized);
+
+        if (in_array($normalized, [
+            PersonalFinanceTransaction::PERSON_A,
+            PersonalFinanceTransaction::PERSON_B,
+            PersonalFinanceTransaction::PERSON_SHARED,
+            PersonalFinanceTransaction::PERSON_EXCLUDED,
+            PersonalFinanceTransaction::PERSON_UNKNOWN,
+        ], true)) {
+            return $normalized;
+        }
+
+        $profile = $this->budgetProfile($companyId);
+        $labels = [
+            strtolower(str_replace([' ', '-'], '_', $profile->person_a_label)) => PersonalFinanceTransaction::PERSON_A,
+            strtolower(str_replace([' ', '-'], '_', $profile->person_b_label)) => PersonalFinanceTransaction::PERSON_B,
+            'shared' => PersonalFinanceTransaction::PERSON_SHARED,
+            'excluded' => PersonalFinanceTransaction::PERSON_EXCLUDED,
+            'unknown' => PersonalFinanceTransaction::PERSON_UNKNOWN,
+            'unassigned' => PersonalFinanceTransaction::PERSON_UNKNOWN,
+        ];
+
+        return $labels[$normalized] ?? $normalized;
     }
 
     private function budgetProfile(string $companyId): PersonalFinanceBudgetProfile

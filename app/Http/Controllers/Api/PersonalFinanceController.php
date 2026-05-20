@@ -83,19 +83,15 @@ class PersonalFinanceController extends Controller
     {
         $validated = $request->validate([
             'category' => ['sometimes', 'string', 'max:80'],
-            'personScope' => ['sometimes', 'string', Rule::in([
-                PersonalFinanceTransaction::PERSON_A,
-                PersonalFinanceTransaction::PERSON_B,
-                PersonalFinanceTransaction::PERSON_SHARED,
-                PersonalFinanceTransaction::PERSON_EXCLUDED,
-                PersonalFinanceTransaction::PERSON_UNKNOWN,
-            ])],
+            'personScope' => ['sometimes', 'string', 'max:120'],
             'normalizedMerchant' => ['sometimes', 'nullable', 'string', 'max:160'],
         ]);
 
         $transaction = PersonalFinanceTransaction::where('company_id', $this->companyId($request))->findOrFail($id);
         $category = $validated['category'] ?? $transaction->category;
-        $personScope = $validated['personScope'] ?? $transaction->person_scope;
+        $personScope = array_key_exists('personScope', $validated)
+            ? $this->normalizePersonScope($this->companyId($request), $validated['personScope'])
+            : $transaction->person_scope;
         $merchant = $validated['normalizedMerchant'] ?? $transaction->normalized_merchant;
 
         $transaction->update([
@@ -300,6 +296,34 @@ class PersonalFinanceController extends Controller
                 'metadata' => [],
             ],
         );
+    }
+
+    private function normalizePersonScope(string $companyId, string $person): string
+    {
+        $normalized = strtolower(trim($person));
+        $normalized = str_replace([' ', '-'], '_', $normalized);
+
+        if (in_array($normalized, [
+            PersonalFinanceTransaction::PERSON_A,
+            PersonalFinanceTransaction::PERSON_B,
+            PersonalFinanceTransaction::PERSON_SHARED,
+            PersonalFinanceTransaction::PERSON_EXCLUDED,
+            PersonalFinanceTransaction::PERSON_UNKNOWN,
+        ], true)) {
+            return $normalized;
+        }
+
+        $profile = $this->budgetProfile($companyId);
+        $labels = [
+            strtolower(str_replace([' ', '-'], '_', $profile->person_a_label)) => PersonalFinanceTransaction::PERSON_A,
+            strtolower(str_replace([' ', '-'], '_', $profile->person_b_label)) => PersonalFinanceTransaction::PERSON_B,
+            'shared' => PersonalFinanceTransaction::PERSON_SHARED,
+            'excluded' => PersonalFinanceTransaction::PERSON_EXCLUDED,
+            'unknown' => PersonalFinanceTransaction::PERSON_UNKNOWN,
+            'unassigned' => PersonalFinanceTransaction::PERSON_UNKNOWN,
+        ];
+
+        return $labels[$normalized] ?? PersonalFinanceTransaction::PERSON_UNKNOWN;
     }
 
     /**

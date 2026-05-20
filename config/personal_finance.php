@@ -3,20 +3,24 @@
 return [
     /*
     |--------------------------------------------------------------------------
-    | Local Personal Finance Analyzer
+    | Personal Finance Analyzer
     |--------------------------------------------------------------------------
     |
-    | This feature is intentionally local-only. Keep the default disabled and
-    | enable it only in a local .env when working with personal bank records.
+    | Keep the default disabled. Local routes are available only in configured
+    | local environments; deployed routes must also pass admin authorization.
     |
     */
 
-    'enabled' => env('PERSONAL_FINANCE_LOCAL_ENABLED', false),
+    'enabled' => env('PERSONAL_FINANCE_ENABLED', env('PERSONAL_FINANCE_LOCAL_ENABLED', false)),
 
     'route_environments' => array_values(array_filter(array_map(
         'trim',
         explode(',', env('PERSONAL_FINANCE_ROUTE_ENVIRONMENTS', 'local,testing'))
     ))),
+
+    'statement_disk' => env('PERSONAL_FINANCE_STATEMENT_DISK', 'local'),
+
+    'statement_prefix' => trim(env('PERSONAL_FINANCE_STATEMENT_PREFIX', ''), '/'),
 
     'statement_path' => env('PERSONAL_FINANCE_STATEMENT_PATH', storage_path('personal')),
 
