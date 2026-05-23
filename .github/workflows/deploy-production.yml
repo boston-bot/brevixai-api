@@ -43,6 +43,23 @@ jobs:
             fi
           done
 
+          if [ -n "${EC2_SSH_KEY}" ]; then
+            if printf '%s' "${EC2_SSH_KEY}" | grep -Eq '^ssh-(rsa|ed25519) '; then
+              echo "::error::EC2_SSH_KEY contains a public key. It must contain the full private key."
+              missing=1
+            fi
+
+            if printf '%s' "${EC2_SSH_KEY}" | grep -q '\\n'; then
+              echo "::error::EC2_SSH_KEY contains literal \\n characters. Paste the key as a multiline secret."
+              missing=1
+            fi
+
+            if ! printf '%s' "${EC2_SSH_KEY}" | grep -Eq -- '-----BEGIN (OPENSSH |RSA |EC )?PRIVATE KEY-----'; then
+              echo "::error::EC2_SSH_KEY must start with a supported private key header."
+              missing=1
+            fi
+          fi
+
           exit "${missing}"
 
       - name: Deploy to EC2
