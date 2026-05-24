@@ -224,15 +224,82 @@ class UploadService
             throw new Exception('Upload inspection is not ready yet', 409);
         }
 
+        $sheets = json_decode($inspection->sheet_inventory, true) ?? [];
+        $firstSheet = $sheets[0] ?? [];
+        $headers = $firstSheet['headers'] ?? [];
+
+        [$fieldMappings, $confidenceHints] = $this->suggestMappings($headers, $upload->import_type);
+
         return [
             'uploadId' => $uploadId,
             'importType' => $upload->import_type,
             'inspection' => [
                 'detectedContentType' => json_decode($inspection->workbook_metadata)->detectedContentType ?? 'application/octet-stream',
-                'sheets' => json_decode($inspection->sheet_inventory),
-                'parserWarnings' => json_decode($inspection->parser_warnings),
+                'sheets' => $sheets,
+                'parserWarnings' => json_decode($inspection->parser_warnings, true) ?? [],
+                'samplePreview' => json_decode($inspection->sample_preview, true) ?? [],
+            ],
+            'mappingSuggestion' => [
+                'sourceSheetName' => $firstSheet['name'] ?? null,
+                'headerRowIndex' => 1,
+                'fieldMappings' => $fieldMappings,
+                'confidenceHints' => $confidenceHints,
             ],
         ];
+    }
+
+    private function suggestMappings(array $headers, ?string $importType): array
+    {
+        $aliases = [
+            'date' => ['date', 'transaction date', 'txn date', 'posted date', 'posting date', 'value date'],
+            'vendor_customer' => ['vendor', 'vendor name', 'customer', 'payee', 'description', 'merchant', 'name'],
+            'amount' => ['amount', 'total', 'total amount', 'debit', 'credit', 'value', 'sum'],
+            'type' => ['type', 'transaction type', 'txn type'],
+            'category' => ['category', 'account', 'account name', 'class'],
+            'payment_method' => ['payment method', 'method', 'payment type', 'pay method'],
+            'department' => ['department', 'dept', 'division', 'cost center'],
+            'invoice_ref' => ['invoice', 'invoice number', 'invoice ref', 'inv num', 'reference', 'ref'],
+            'memo' => ['memo', 'notes', 'note', 'comment', 'remarks'],
+            'txn_id' => ['id', 'transaction id', 'txn id', 'transaction number', 'txn number', 'check number'],
+        ];
+
+        $lowerHeaders = array_map('strtolower', $headers);
+        $fieldMappings = [];
+        $confidenceHints = [];
+
+        foreach ($aliases as $targetField => $fieldAliases) {
+            $matched = null;
+            $confidence = 'none';
+
+            foreach ($headers as $i => $header) {
+                $lower = $lowerHeaders[$i];
+                if (in_array($lower, $fieldAliases, true)) {
+                    $matched = $header;
+                    $confidence = 'high';
+                    break;
+                }
+            }
+
+            if (! $matched) {
+                foreach ($headers as $i => $header) {
+                    $lower = $lowerHeaders[$i];
+                    foreach ($fieldAliases as $alias) {
+                        if (str_contains($lower, $alias) || str_contains($alias, $lower)) {
+                            $matched = $header;
+                            $confidence = 'medium';
+                            break 2;
+                        }
+                    }
+                }
+            }
+
+            $fieldMappings[$targetField] = $matched;
+            if ($matched) {
+                $confidenceHints[$targetField] = ['confidence' => $confidence];
+            }
+        }
+
+        return [$fieldMappings, $confidenceHints];
     }
 
     public function saveMapping(string $companyId, string $userId, string $uploadId, array $data): array
