@@ -6,9 +6,9 @@ Generated: 2026-05-24. Use this to resume the Production Readiness Review in a n
 
 | Repo | Path | Branch | State |
 |---|---|---|---|
-| `brevixai-api` | `/Users/joe.eagan/Documents/GitHub/brevixai-api` | `ready-review` | Uncommitted PRR-016 changes. Commit before next session. |
-| `brevixai` | `/Users/joe.eagan/Documents/GitHub/brevixai` | `main` | Clean. All Wave 1 + Wave 2 changes committed. |
-| `brevixai-agents` | `/Users/joe.eagan/Documents/GitHub/brevixai-agents` | unknown | Clean. |
+| `brevixai-api` | `/Users/joe.eagan/Documents/GitHub/brevixai-api` | `dev` | Uncommitted PRR continuation changes: PRR-024 fix, upload pipeline coverage, README/tracker/handoff updates. Full API tests pass; commit before next session. |
+| `brevixai` | `/Users/joe.eagan/Documents/GitHub/brevixai` | `dev` | Clean. Wave 1 + Wave 2 changes committed. |
+| `brevixai-agents` | `/Users/joe.eagan/Documents/GitHub/brevixai-agents` | `main` | Clean. |
 
 Primary tracker: `brevixai-api/docs/production-readiness-review.md`
 
@@ -27,7 +27,7 @@ brevixai (Expo 55 / React Native Web, Expo Router, React 19)
 
 | Repo | Command | Expected |
 |---|---|---|
-| `brevixai-api` | `php artisan test` | 247 tests pass |
+| `brevixai-api` | `php artisan test` | 255 tests pass after this continuation |
 | `brevixai` | `npm test -- --runInBand` | 108 tests pass |
 | `brevixai` | `npm run test:e2e -- --project=chromium` | 3 tests pass |
 | `brevixai-agents` | `.venv/bin/pytest tests/ --ignore=tests/test_evals.py -q` | 397 tests pass |
@@ -37,10 +37,11 @@ brevixai (Expo 55 / React Native Web, Expo Router, React 19)
 
 ### Uncommitted in `brevixai-api` (commit this first)
 
-1. `app/Http/Controllers/Api/AlertRecommendationController.php` — added `AlertRecommendationService` dependency and `run()` method (PRR-016)
-2. `routes/api.php` — added `Route::post('/run', [AlertRecommendationController::class, 'run'])` at top of alerts group (PRR-016)
-3. `tests/Feature/AlertRunEngineTest.php` — new file; 4 tests covering auth, clean company, high-risk company, pending count (PRR-016)
-4. `docs/production-readiness-review.md` — tracker updated; PRR-016 resolved; handoff snapshot updated
+1. `app/Services/QboService.php` - removed global QuickBooks env credential fallback; company-scoped credentials now fail closed when missing or corrupted (PRR-024)
+2. `tests/Feature/QuickBooksRedirectUriTest.php` - added missing/corrupt credential tests proving global env credentials are ignored (PRR-024)
+3. `tests/Feature/UploadPipelineTest.php` - new focused scan -> validate -> promote CSV pipeline test
+4. `README.md` - updated QuickBooks credential documentation to reflect DB-scoped credentials
+5. `docs/production-readiness-review.md` and `docs/prr-handoff-context.md` - reconciled current repo state and open findings
 
 ### All committed (do not redo)
 
@@ -61,6 +62,10 @@ Wave 2 (all committed):
 - PRR-003: `brevixai-api/README.md` rewritten; `brevixai/README.md` created
 - PRR-010: `brevixai/.env.example` scoped to `EXPO_PUBLIC_*` only
 
+Wave 3 continuation (currently uncommitted in `brevixai-api`):
+- PRR-024: `QboService::getCredentials()` no longer falls back to global `QB_CLIENT_ID` / `QB_CLIENT_SECRET`. Missing or corrupted company-scoped credentials now return clear setup errors.
+- Upload pipeline coverage: `UploadPipelineTest` directly verifies CSV file contents flow through `ScanUploadJob`, `ValidateUploadJob`, and `PromoteUploadJob` into `transactions`.
+
 ## All open findings
 
 | ID | Severity | Status | Finding | Key file(s) |
@@ -71,10 +76,11 @@ Wave 2 (all committed):
 | PRR-017 | High | Open | Onboarding wizard is educational only — no step links to upload or QB connect | `brevixai/app/(dashboard)/onboarding.tsx` |
 | PRR-018 | High | Open | Overview empty state looks like "no risk" not "no data"; no CTA to upload or connect | `brevixai/app/(dashboard)/overview.tsx` |
 | PRR-019 | Medium | Open | QB OAuth callback redirects to `/settings` with no success signal | `brevixai-api/app/Http/Controllers/Api/IntegrationController.php:60` |
-| PRR-020 | Medium | Open | QB sync is manual — no sync job queued after OAuth callback | `brevixai-api/app/Http/Controllers/Api/IntegrationController.php` |
+| PRR-020 | Medium | Open | QB post-OAuth sync is frontend best-effort only; no reliable server-side sync is queued after callback | `brevixai-api/app/Http/Controllers/Api/IntegrationController.php`, `brevixai/app/(dashboard)/settings.tsx` |
 | PRR-021 | Medium | Open | Rex returns generic "no data" message; no nudge to upload or connect QB | `brevixai/app/(dashboard)/index.tsx` |
+| PRR-025 | Low | Open | OAuth state nonce is cache-only; cache restart breaks in-flight auth flows | `brevixai-api/app/Services/QboService.php` |
 
-## Wave 3 tracks not started
+## Wave 3 tracks
 
 These are open-ended exploration + findings passes, not pre-known bugs:
 
@@ -117,11 +123,11 @@ All under `/api/internal/agent-tools/`:
 
 ## Recommended next actions (in priority order)
 
-1. **Commit PRR-016** in `brevixai-api` (controller + route + test + tracker).
-2. **PRR-017/018** — quick UX wins before next demo: add onboarding action links and overview empty-state banner.
-3. **Wave 3: Data ingestion track** — QB OAuth and upload pipeline audit.
-4. **Wave 3: Fraud/risk/cases track** — scoring completeness, case lifecycle.
-5. **PRR-019/020** — QB success signal and auto-sync after OAuth.
+1. **Commit the current PRR continuation** in `brevixai-api`.
+2. **PRR-017/018** - quick UX wins before next demo: add onboarding action links and overview empty-state banner.
+3. **PRR-019/020** - QB success signal and reliable server-side post-OAuth sync behavior.
+4. **Wave 3: Data ingestion track** - continue QB OAuth and upload pipeline audit.
+5. **Wave 3: Fraud/risk/cases track** - scoring completeness, case lifecycle.
 
 ## Open questions for user
 

@@ -58,8 +58,8 @@ See `.env.example` for the full list with comments. The most important for each 
 | `LLM_MODEL` | Production | Verify against deployed model name |
 | `BREVIX_AGENT_SERVICE_URL` | Production | Internal URL of the agent service |
 | `BREVIX_AGENT_SERVICE_KEY` | Production | Shared bearer token with agent service |
-| `QB_CLIENT_ID` / `QB_CLIENT_SECRET` | Production | QuickBooks OAuth app credentials |
 | `QB_REDIRECT_URI` | Production | Must match exactly what is registered in the QB developer portal |
+| Company-scoped QuickBooks credentials | Application DB | Saved through the Settings page before OAuth connect; global `QB_CLIENT_ID` / `QB_CLIENT_SECRET` env fallback is intentionally not supported |
 
 ## Deployment
 
