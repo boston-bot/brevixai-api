@@ -9,6 +9,7 @@ use App\Models\RecommendationReviewEvent;
 use App\Models\User;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AlertRecommendationReviewService
 {
@@ -35,7 +36,7 @@ class AlertRecommendationReviewService
 
             $this->ensurePendingReview($recommendation);
 
-            $alert = Alert::create([
+            $alertPayload = [
                 'company_id' => $recommendation->company_id,
                 'alert_recommendation_id' => $recommendation->id,
                 'rule_key' => $recommendation->alert_type,
@@ -45,7 +46,20 @@ class AlertRecommendationReviewService
                 'evidence' => $this->alertEvidence($recommendation),
                 'status' => 'open',
                 'priority_score' => $this->priorityScore($recommendation->severity),
-            ]);
+            ];
+
+            if (Schema::hasColumn('alerts', 'reason_codes')) {
+                $alertPayload = array_merge($alertPayload, [
+                    'reason_codes' => $this->reasonCodes($recommendation),
+                    'source_system' => 'deterministic_recommendation_engine',
+                    'source_recommendation_id' => $recommendation->id,
+                    'confidence_score' => $recommendation->confidence_score,
+                    'evidence_refs' => $this->evidenceRefs($recommendation),
+                    'comparison_window' => $this->comparisonWindow($recommendation),
+                ]);
+            }
+
+            $alert = Alert::create($alertPayload);
 
             $recommendation->update([
                 'status' => AlertRecommendation::STATUS_APPROVED,
@@ -143,8 +157,53 @@ class AlertRecommendationReviewService
             'source_rule_ids' => $recommendation->source_rule_ids ?? [],
             'confidence_score' => $recommendation->confidence_score,
         ];
+        $evidence['professional_services_notice'] = 'informational_risk_indicator_only';
 
         return $evidence;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function reasonCodes(AlertRecommendation $recommendation): array
+    {
+        $codes = is_array($recommendation->source_rule_ids) ? $recommendation->source_rule_ids : [];
+        if ($codes === []) {
+            $codes[] = (string) $recommendation->alert_type;
+        }
+
+        return array_values(array_unique(array_map('strval', $codes)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function evidenceRefs(AlertRecommendation $recommendation): array
+    {
+        $refs = [
+            'recommendation:'.$recommendation->id,
+            'domain:'.$recommendation->source_risk_domain,
+        ];
+
+        foreach ($this->reasonCodes($recommendation) as $reasonCode) {
+            $refs[] = 'rule:'.$reasonCode;
+        }
+
+        return array_values(array_unique($refs));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function comparisonWindow(AlertRecommendation $recommendation): array
+    {
+        $evidence = is_array($recommendation->evidence) ? $recommendation->evidence : [];
+
+        return [
+            'basis' => 'current_available_records',
+            'source_risk_domain' => $recommendation->source_risk_domain,
+            'period' => $evidence['period'] ?? null,
+        ];
     }
 
     private function priorityScore(string $severity): int

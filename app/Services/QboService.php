@@ -54,22 +54,20 @@ class QboService
             ->whereNull('realm_id')
             ->first();
 
-        $clientId = env('QB_CLIENT_ID');
-        $clientSecret = env('QB_CLIENT_SECRET');
-        $env = env('QB_ENVIRONMENT', 'sandbox');
-
-        if ($row && $row->client_id_enc) {
-            try {
-                $clientId = decrypt($row->client_id_enc);
-                $clientSecret = decrypt($row->client_secret_enc);
-                $env = $row->environment ?? $env;
-            } catch (\Throwable $e) {
-                // fallback to env
-            }
+        if (! $row || ! $row->client_id_enc || ! $row->client_secret_enc) {
+            throw new Exception('QuickBooks credentials not configured for this company.');
         }
 
-        if (!$clientId) {
-            throw new Exception("QuickBooks credentials not configured for this company.");
+        try {
+            $clientId = decrypt($row->client_id_enc);
+            $clientSecret = decrypt($row->client_secret_enc);
+            $env = $row->environment ?: 'sandbox';
+        } catch (\Throwable $e) {
+            throw new Exception('QuickBooks credentials are invalid for this company.');
+        }
+
+        if (! $clientId || ! $clientSecret) {
+            throw new Exception('QuickBooks credentials not configured for this company.');
         }
 
         return [$clientId, $clientSecret, $env];

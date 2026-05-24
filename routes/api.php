@@ -1,7 +1,8 @@
 <?php
 
-use App\Http\Controllers\Api\AccountingController;
+use App\Http\Controllers\Api\AgentApprovalController;
 use App\Http\Controllers\Api\AlertController;
+use App\Http\Controllers\Api\EntityGraphController;
 use App\Http\Controllers\Api\AlertRecommendationController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
@@ -41,6 +42,8 @@ $personalFinanceRoutes = function (): void {
 Route::prefix('auth')->group(function () {
     Route::post('/signup', [AuthController::class, 'signup']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
 // QBO Callback (Handles Intuit redirect, uses state nonce for security, no Auth required)
@@ -57,6 +60,11 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/aggregate-risk-summary', [AgentToolController::class, 'aggregateRiskSummary']);
         Route::get('/company/{companyId}/alert-recommendations', [AgentToolController::class, 'alertRecommendations']);
         Route::get('/company/{companyId}/case-recommendations', [AgentToolController::class, 'caseRecommendations']);
+        Route::get('/company/{companyId}/transactions', [AgentToolController::class, 'transactions']);
+        Route::get('/company/{companyId}/dashboard', [AgentToolController::class, 'dashboard']);
+        Route::get('/process-registry', [AgentToolController::class, 'processRegistry']);
+        Route::get('/company/{companyId}/pending-recommendations', [AgentToolController::class, 'pendingRecommendations']);
+        Route::get('/company/{companyId}/transaction-detail', [AgentToolController::class, 'transactionDetail']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
@@ -115,11 +123,6 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/cash-flow', [AnalyticsController::class, 'cashFlow']);
     });
 
-    // Accounting
-    Route::prefix('accounting')->group(function () {
-        Route::get('/tax-estimate', [AccountingController::class, 'taxEstimate']);
-    });
-
     // Dashboard
     Route::prefix('dashboard')->group(function () {
         Route::get('/summary', [DashboardController::class, 'summary']);
@@ -159,6 +162,7 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/{id}', [UploadController::class, 'show']);
         Route::post('/{id}/complete', [UploadController::class, 'complete']);
         Route::get('/{id}/preview', [UploadController::class, 'preview']);
+        Route::get('/{id}/errors', [UploadController::class, 'errors']);
         Route::post('/{id}/mappings', [UploadController::class, 'mappings']);
         Route::post('/{id}/validate', [UploadController::class, 'validateUpload']);
         Route::post('/{id}/promote', [UploadController::class, 'promote']);
@@ -215,6 +219,18 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/groups', [AlertController::class, 'groups']);
         Route::get('/{id}', [AlertController::class, 'show']);
         Route::patch('/{id}', [AlertController::class, 'update']);
+    });
+
+    // Agent Approvals
+    Route::prefix('agent-approvals')->group(function () {
+        Route::post('/{id}/approve', [AgentApprovalController::class, 'approve']);
+        Route::post('/{id}/reject', [AgentApprovalController::class, 'reject']);
+    });
+
+    // Entity Graph
+    Route::prefix('entity-graph')->group(function () {
+        Route::get('/', [EntityGraphController::class, 'index']);
+        Route::get('/node/{id}', [EntityGraphController::class, 'node']);
     });
 
     // Transactions

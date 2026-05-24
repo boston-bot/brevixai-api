@@ -16,8 +16,17 @@ class RexOrchestratorService
             'ar',
             'vendors',
             'cases',
+            'alert_recommendations',
+            'case_recommendations',
             'controls',
             'transactions',
+            'transaction_lookup',
+            'dashboard_health',
+            'controls_review',
+            'reconciliation_review',
+            'entity_graph_review',
+            'case_management',
+            'reporting',
         ];
     }
 
@@ -42,8 +51,17 @@ class RexOrchestratorService
             'ar' => $this->arAging($companyId),
             'vendors' => $this->vendors($companyId),
             'cases' => $this->cases($companyId),
+            'alert_recommendations' => $this->alertRecommendations($companyId),
+            'case_recommendations' => $this->caseRecommendations($companyId),
             'controls' => $this->controls($companyId),
             'transactions' => $this->transactions($companyId),
+            'transaction_lookup' => $this->transactions($companyId),
+            'dashboard_health' => $this->dashboardHealth($companyId),
+            'controls_review' => $this->controls($companyId),
+            'reconciliation_review' => $this->reconciliation($companyId),
+            'entity_graph_review' => $this->entityGraph($companyId),
+            'case_management' => $this->cases($companyId),
+            'reporting' => $this->reporting($companyId),
             default => null,
         };
     }
@@ -203,6 +221,32 @@ class RexOrchestratorService
         );
     }
 
+    private function alertRecommendations(string $companyId): array
+    {
+        $data = app(\App\Services\Agents\AlertRecommendationService::class)->getAlertRecommendations($companyId);
+
+        return $this->result(
+            'alert_recommendations',
+            'alert_recommendation_list',
+            'Alert Recommendations',
+            $data,
+            sprintf('I found %d alert recommendations pending review.', count($data['recommended_alerts'] ?? []))
+        );
+    }
+
+    private function caseRecommendations(string $companyId): array
+    {
+        $data = app(\App\Services\Agents\CaseRecommendationService::class)->getCaseRecommendations($companyId);
+
+        return $this->result(
+            'case_recommendations',
+            'case_recommendation_list',
+            'Case Recommendations',
+            $data,
+            sprintf('I found %d case recommendations pending review.', count($data['case_recommendations'] ?? []))
+        );
+    }
+
     private function transactions(string $companyId): array
     {
         $data = app(TransactionService::class)->list($companyId, ['limit' => 25]);
@@ -213,6 +257,74 @@ class RexOrchestratorService
             'Recent Transactions',
             $data,
             sprintf('I pulled %d recent transactions from the ledger.', count($data['transactions'] ?? []))
+        );
+    }
+
+    private function dashboardHealth(string $companyId): array
+    {
+        $dashboard = app(DashboardService::class)->summary($companyId);
+        $alertData = app(AlertService::class)->list($companyId, ['status' => 'open', 'limit' => 10], true);
+        $controlsData = app(ControlsService::class)->health($companyId);
+
+        $data = [
+            'risk_score' => $dashboard['riskScore'] ?? 0,
+            'open_alerts' => count($alertData['alerts'] ?? []),
+            'controls_grade' => $controlsData['letterGrade'] ?? 'N/A',
+            'unresolved_violations' => $controlsData['summary']['unresolvedViolations'] ?? 0,
+            'total_transactions' => $dashboard['stats']['totalTransactions'] ?? 0,
+            'flagged_alerts' => $dashboard['stats']['flaggedAlerts'] ?? 0,
+        ];
+
+        return $this->result(
+            'dashboard_health',
+            'dashboard_health_snapshot',
+            'Dashboard Health Snapshot',
+            $data,
+            sprintf(
+                'Dashboard health: risk score %d/100, %d open alerts, controls grade %s, %d unresolved violations.',
+                (int) $data['risk_score'],
+                (int) $data['open_alerts'],
+                $data['controls_grade'],
+                (int) $data['unresolved_violations']
+            )
+        );
+    }
+
+    private function entityGraph(string $companyId): array
+    {
+        $data = app(EntityGraphService::class)->getGraph($companyId);
+
+        return $this->result(
+            'entity_graph_review',
+            'entity_graph_summary',
+            'Entity Relationship Graph',
+            $data,
+            sprintf(
+                'I checked the entity graph. It includes %d entities, %d relationships, and %d relationship patterns.',
+                (int) ($data['summary']['totalNodes'] ?? 0),
+                (int) ($data['summary']['totalEdges'] ?? 0),
+                (int) ($data['summary']['totalPatterns'] ?? 0)
+            )
+        );
+    }
+
+    private function reporting(string $companyId): array
+    {
+        $data = [
+            'status' => 'preview',
+            'available_workflows' => [
+                'Generate an investigation report from a selected case.',
+                'Generate a package manifest for investigation export materials.',
+            ],
+            'required_context' => ['investigation_case_id'],
+        ];
+
+        return $this->result(
+            'reporting',
+            'reporting_readiness',
+            'Investigation Reporting',
+            $data,
+            'Investigation reporting is available from a selected case. Choose an investigation before generating report or package materials.'
         );
     }
 
@@ -237,15 +349,21 @@ class RexOrchestratorService
         $text = strtolower($content);
 
         return match (true) {
-            str_contains($text, 'financial health') || str_contains($text, 'overview') || str_contains($text, 'dashboard') => 'dashboard',
+            str_contains($text, 'dashboard health') || str_contains($text, 'health snapshot') => 'dashboard_health',
+            str_contains($text, 'entity graph') || str_contains($text, 'relationship graph') => 'entity_graph_review',
+            str_contains($text, 'reporting') || str_contains($text, 'investigation report') || str_contains($text, 'package manifest') => 'reporting',
+            str_contains($text, 'financial health') || str_contains($text, 'overview') || str_contains($text, 'dashboard') || str_contains($text, 'risk score') => 'dashboard',
             str_contains($text, 'spend summary') || str_contains($text, 'cash flow') || str_contains($text, 'analytics') => 'analytics',
+            str_contains($text, 'alert recommendation') || str_contains($text, 'recommended alert') || str_contains($text, 'recommended alerts') => 'alert_recommendations',
             str_contains($text, 'fraud alert') || str_contains($text, 'open alert') || str_contains($text, 'alerts') => 'alerts',
             str_contains($text, 'suspicious') || str_contains($text, 'flagged transaction') => 'suspicious',
-            str_contains($text, 'reconciliation') || str_contains($text, 'unmatched') => 'reconciliation',
+            str_contains($text, 'reconciliation') || str_contains($text, 'unmatched') => 'reconciliation_review',
             str_contains($text, 'overdue') || str_contains($text, 'write-off') || str_contains($text, 'invoice') || str_contains($text, 'collection') => 'ar',
+            str_contains($text, 'case recommendation') || str_contains($text, 'recommended case') || str_contains($text, 'recommended cases') => 'case_recommendations',
             str_contains($text, 'vendor') => 'vendors',
-            str_contains($text, 'case') || str_contains($text, 'investigation') => 'cases',
-            str_contains($text, 'control') => 'controls',
+            str_contains($text, 'case') || str_contains($text, 'investigation') => 'case_management',
+            str_contains($text, 'control') => 'controls_review',
+            str_contains($text, 'look up transaction') || str_contains($text, 'find transaction') || str_contains($text, 'lookup transaction') => 'transaction_lookup',
             str_contains($text, 'transaction') => 'transactions',
             default => null,
         };

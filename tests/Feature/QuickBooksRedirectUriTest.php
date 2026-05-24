@@ -63,6 +63,15 @@ class QuickBooksRedirectUriTest extends TestCase
             $table->text('sync_error')->nullable();
             $table->timestamps();
         });
+
+        $this->clearGlobalQuickBooksEnv();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->clearGlobalQuickBooksEnv();
+
+        parent::tearDown();
     }
 
     public function test_qbo_connect_uses_configured_frontend_callback_redirect_uri(): void
@@ -93,6 +102,44 @@ class QuickBooksRedirectUriTest extends TestCase
         $this->assertSame('client-id', $query['client_id']);
     }
 
+    public function test_qbo_connect_does_not_fall_back_to_global_credentials(): void
+    {
+        [, $user] = $this->createCompanyUser();
+        Sanctum::actingAs($user);
+        $this->setGlobalQuickBooksEnv();
+
+        $this->getJson('/api/integrations/qbo/connect')
+            ->assertStatus(400)
+            ->assertJson([
+                'error' => 'QuickBooks credentials not configured for this company.',
+            ]);
+    }
+
+    public function test_qbo_connect_rejects_corrupted_company_credentials_without_env_fallback(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        Sanctum::actingAs($user);
+        $this->setGlobalQuickBooksEnv();
+
+        DB::table('integrations')->insert([
+            'id' => (string) Str::uuid(),
+            'company_id' => $company->id,
+            'provider' => 'quickbooks',
+            'realm_id' => null,
+            'client_id_enc' => 'not-valid-encrypted-payload',
+            'client_secret_enc' => encrypt('client-secret'),
+            'environment' => 'sandbox',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/integrations/qbo/connect')
+            ->assertStatus(400)
+            ->assertJson([
+                'error' => 'QuickBooks credentials are invalid for this company.',
+            ]);
+    }
+
     /**
      * @return array{0: Company, 1: User}
      */
@@ -118,5 +165,27 @@ class QuickBooksRedirectUriTest extends TestCase
         $user->save();
 
         return [$company, $user];
+    }
+
+    private function setGlobalQuickBooksEnv(): void
+    {
+        putenv('QB_CLIENT_ID=global-client-id');
+        putenv('QB_CLIENT_SECRET=global-client-secret');
+        $_ENV['QB_CLIENT_ID'] = 'global-client-id';
+        $_ENV['QB_CLIENT_SECRET'] = 'global-client-secret';
+        $_SERVER['QB_CLIENT_ID'] = 'global-client-id';
+        $_SERVER['QB_CLIENT_SECRET'] = 'global-client-secret';
+    }
+
+    private function clearGlobalQuickBooksEnv(): void
+    {
+        putenv('QB_CLIENT_ID');
+        putenv('QB_CLIENT_SECRET');
+        unset(
+            $_ENV['QB_CLIENT_ID'],
+            $_ENV['QB_CLIENT_SECRET'],
+            $_SERVER['QB_CLIENT_ID'],
+            $_SERVER['QB_CLIENT_SECRET'],
+        );
     }
 }
