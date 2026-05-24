@@ -45,7 +45,7 @@ class SubscriptionController extends Controller
         }
 
         $validated = $request->validate([
-            'tier' => ['required', 'string', Rule::in(['starter', 'growth', 'accounting', 'accounting-firm'])],
+            'tier' => ['required', 'string', Rule::in(['starter', 'growth', 'risk-advisory', 'accounting', 'accounting-firm'])],
             'paymentMethod' => ['required', 'array'],
             'paymentMethod.cardName' => ['required', 'string', 'max:255'],
             'paymentMethod.lastFour' => ['required', 'digits:4'],
@@ -103,6 +103,9 @@ class SubscriptionController extends Controller
 
     private function normalizeTier(string $tier): string
     {
-        return $tier === 'accounting-firm' ? 'accounting' : $tier;
+        return match ($tier) {
+            'accounting', 'accounting-firm' => 'risk-advisory',
+            default => $tier,
+        };
     }
 }

@@ -137,7 +137,7 @@ class ReconciliationRiskScoringService
                 'rule_key' => 'duplicate_ledger',
                 'name' => 'Duplicate Ledger Entries',
                 'weight' => $ruleWeights['duplicate_ledger'],
-                'explanation' => 'Identified multiple duplicate internal bookkeeping transactions matching a single bank record.',
+                'explanation' => 'Identified multiple duplicate internal ledger transactions matching a single bank record.',
             ];
             $supportingEvidence['duplicate_ledger'] = [
                 'discrepancies' => $duplicateEntries,
@@ -253,11 +253,11 @@ class ReconciliationRiskScoringService
         // Define recommended next action
         $recommendedAction = 'Reconciliation is clean. Continue continuous monitoring.';
         if ($score >= 90) {
-            $recommendedAction = 'Audit all suspicious manual adjustment logs and freeze manual journal entries until verified.';
+            $recommendedAction = 'Review suspicious manual adjustment logs and pause manual journal entries until verified.';
         } elseif ($score >= 70) {
             $recommendedAction = 'Reconcile stale unmatched items immediately and review the bank-to-ledger matching algorithms.';
         } elseif ($score >= 40) {
-            $recommendedAction = 'Investigate duplicate bookkeeping entries and match the identified deposits/withdrawals.';
+            $recommendedAction = 'Investigate duplicate ledger entries and match the identified deposits/withdrawals.';
         }
 
         return [

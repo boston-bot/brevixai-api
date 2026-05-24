@@ -16,12 +16,17 @@ class Alert extends Model
 
     protected $fillable = [
         'company_id', 'group_id', 'alert_recommendation_id', 'rule_key', 'severity', 'title',
-        'detail', 'evidence', 'status', 'priority_score',
+        'detail', 'evidence', 'reason_codes', 'source_system', 'source_recommendation_id',
+        'confidence_score', 'evidence_refs', 'comparison_window', 'status', 'priority_score',
         'reviewed_by', 'reviewed_at',
     ];
 
     protected $casts = [
         'evidence' => 'array',
+        'reason_codes' => 'array',
+        'confidence_score' => 'float',
+        'evidence_refs' => 'array',
+        'comparison_window' => 'array',
         'reviewed_at' => 'datetime',
     ];
 

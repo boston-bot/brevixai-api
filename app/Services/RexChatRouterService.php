@@ -163,6 +163,15 @@ class RexChatRouterService
                 ];
             }
 
+            if ($process->mode() === 'orchestrator') {
+                return [
+                    'mode' => 'orchestrator',
+                    'route' => $process->value,
+                    'requested_action' => null,
+                    'reason' => (string) ($decision['reason'] ?? 'llm_process_route'),
+                ];
+            }
+
             return $this->agentDecision($process, (string) ($decision['reason'] ?? 'llm_route'));
         }
 
@@ -238,12 +247,14 @@ class RexChatRouterService
         ));
 
         return <<<PROMPT
-You are the routing brain for Rex, Brevix AI's financial-audit chat assistant.
+You are the routing brain for Rex, Brevix AI's financial intelligence orchestration layer.
 
 Choose exactly one mode:
-- direct: answer with general accounting, audit, product, or workflow guidance without company data.
+- direct: answer only product navigation, data-source setup, or risk-workflow questions that do not require company-specific analysis.
 - orchestrator: run one deterministic Laravel data lookup route. Use this for simple company-data lookups such as dashboard, analytics, open alerts, reconciliation, AR aging, vendors, cases, controls, or transactions.
 - agent: kick off a controlled agent workflow. Use this for fraud, suspicious activity, anomaly review, multi-step vendor or transaction risk analysis, or requests that should combine tools and reasoning.
+
+Do not classify legal, tax, accounting, audit-opinion, CPA, investment, law-enforcement, or attorney-client requests as direct professional guidance. If they can be answered only as product or workflow boundaries, use direct; if they need company data or risk evidence, route to orchestrator or agent.
 
 Valid orchestrator routes: {$orchestratorRoutes}
 

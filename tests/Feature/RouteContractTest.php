@@ -68,6 +68,8 @@ class RouteContractTest extends TestCase
             'GET api/cases/{id}/pdf/status/{job}',
             // Reconciliation run not deterministically safe in Phase 1 — button disabled
             'POST api/reconciliation/run',
+            // Tax-estimate surface removed; Brevix monitors financial risk rather than preparing tax estimates
+            'GET api/accounting/tax-estimate',
         ];
 
         $registered = $this->registeredRoutes();

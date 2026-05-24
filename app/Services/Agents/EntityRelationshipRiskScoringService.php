@@ -305,9 +305,9 @@ class EntityRelationshipRiskScoringService
         // Define recommended next action
         $recommendedAction = 'Entity relationships are within safe parameters. Continue continuous monitoring.';
         if ($score >= 90) {
-            $recommendedAction = 'Audit all transactions associated with the overlapping employee and review conflict of interest declarations immediately.';
+            $recommendedAction = 'Review all transactions associated with the overlapping employee and check conflict of interest declarations immediately.';
         } elseif ($score >= 70) {
-            $recommendedAction = 'Conduct a forensic review of the shared banking or address clusters to identify potentially fraudulent shell vendors.';
+            $recommendedAction = 'Conduct a relationship risk review of the shared banking or address clusters and preserve supporting evidence for human investigation.';
         } elseif ($score >= 40) {
             $recommendedAction = 'Merge duplicate vendor records and trace the ultimate beneficial ownership of the related entity clusters.';
         }

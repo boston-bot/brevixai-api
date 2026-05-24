@@ -103,9 +103,11 @@ class AgentApprovalExecutionTest extends TestCase
 
         $response = $this->postJson("/api/agent-approvals/{$approval->id}/approve")
             ->assertOk()
-            ->assertJsonPath('status', 'approved');
+            ->assertJsonPath('status', 'approved')
+            ->assertJsonPath('result.resource_type', 'alert');
 
         $this->assertNotNull($response->json('executed_at'));
+        $this->assertNotNull($response->json('result.resource_id'));
         $this->assertDatabaseCount('alerts', 1);
         $this->assertDatabaseHas('alerts', [
             'company_id' => $company->id,
@@ -117,6 +119,26 @@ class AgentApprovalExecutionTest extends TestCase
             'id' => $approval->id,
             'status' => 'approved',
             'approved_by' => $user->id,
+        ]);
+    }
+
+    public function test_approve_writes_failed_at_on_execution_failure(): void
+    {
+        [$company, $user, $approval] = $this->createPendingApproval();
+        Sanctum::actingAs($user);
+
+        Schema::drop('alerts'); // force execution failure inside the transaction
+
+        $this->postJson("/api/agent-approvals/{$approval->id}/approve")
+            ->assertStatus(422);
+
+        $fresh = AgentActionApproval::find($approval->id);
+        $this->assertNotNull($fresh->failed_at);
+        $this->assertNotNull($fresh->error_message);
+        $this->assertSame('failed', $fresh->status);
+        $this->assertDatabaseMissing('agent_action_approvals', [
+            'id' => $approval->id,
+            'status' => 'approved',
         ]);
     }
 

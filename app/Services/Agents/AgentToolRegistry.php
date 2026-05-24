@@ -12,6 +12,7 @@ class AgentToolRegistry
     /**
      * Map of tool key → URI path suffix under /api/internal/agent-tools/.
      * The suffix is appended to the appropriate base path (companies/{id}/ or company/{id}/).
+     * Suffixes without {companyId} are global (e.g. process-registry).
      *
      * @return array<string, string>
      */
@@ -28,6 +29,9 @@ class AgentToolRegistry
             'case_recommendations'     => 'company/{companyId}/case-recommendations',
             'transaction_lookup'       => 'company/{companyId}/transactions',
             'dashboard_health'         => 'company/{companyId}/dashboard',
+            'transaction_detail'       => 'company/{companyId}/transaction-detail',
+            'pending_recommendations'  => 'company/{companyId}/pending-recommendations',
+            'process_registry'         => 'process-registry',
         ];
     }
 

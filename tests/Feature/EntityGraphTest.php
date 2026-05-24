@@ -97,14 +97,50 @@ class EntityGraphTest extends TestCase
             ->assertJsonStructure([
                 'nodes',
                 'edges',
-                'summary' => ['risk_score', 'risk_level', 'node_count', 'edge_count'],
+                'patterns',
+                'summary' => [
+                    'risk_score',
+                    'risk_level',
+                    'node_count',
+                    'edge_count',
+                    'totalNodes',
+                    'totalEdges',
+                    'totalPatterns',
+                    'nodesByType',
+                    'criticalPatterns',
+                    'warningPatterns',
+                ],
             ]);
 
         $nodes = $response->json('nodes');
         $types = array_column($nodes, 'type');
 
-        $this->assertContains('user', $types);
+        $this->assertContains('company', $types);
+        $this->assertContains('employee', $types);
         $this->assertContains('vendor', $types);
+        $this->assertSame(count($nodes), $response->json('summary.totalNodes'));
+        $this->assertSame(1, $response->json('summary.nodesByType.company'));
+        $this->assertArrayHasKey('transactionCount', $nodes[0]);
+        $this->assertArrayHasKey('totalVolume', $nodes[0]);
+    }
+
+    public function test_entity_graph_exposes_relationship_patterns_for_frontend_contract(): void
+    {
+        [$company, $user, $upload] = $this->createCompanyUserUpload();
+        $this->createTransaction($company->id, $upload->id, $user->first_name.' '.$user->last_name.' Services');
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/entity-graph')
+            ->assertOk()
+            ->assertJsonPath('patterns.0.type', 'employee_vendor_overlap')
+            ->assertJsonPath('patterns.0.severity', 'warning')
+            ->assertJsonPath('patterns.0.title', 'Employee/Vendor Overlap')
+            ->assertJsonPath('summary.totalPatterns', 1)
+            ->assertJsonPath('summary.warningPatterns', 1);
+
+        $pattern = $response->json('patterns.0');
+        $this->assertContains($user->id, $pattern['involvedEntities']);
     }
 
     public function test_entity_graph_is_company_scoped(): void
@@ -148,9 +184,15 @@ class EntityGraphTest extends TestCase
 
         $response = $this->getJson("/api/entity-graph/node/{$user->id}")
             ->assertOk()
-            ->assertJsonStructure(['node' => ['id', 'type', 'label', 'metadata']]);
+            ->assertJsonStructure([
+                'node' => ['id', 'type', 'label', 'metadata', 'transactionCount', 'totalVolume'],
+                'connectedEdges',
+                'connectedNodes',
+                'patterns',
+                'transactions',
+            ]);
 
-        $this->assertSame('user', $response->json('node.type'));
+        $this->assertSame('employee', $response->json('node.type'));
         $this->assertSame($user->id, $response->json('node.id'));
     }
 

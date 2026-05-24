@@ -16,6 +16,7 @@ class ChatService
     private const DAILY_QUOTA = [
         'starter' => 0,
         'growth' => 50,
+        'risk-advisory' => 200,
         'accounting' => 200,
         'accounting-firm' => 200,
     ];

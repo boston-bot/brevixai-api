@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\InvestigationActivityEvent;
+use App\Support\ProfessionalServicesDisclaimer;
 use Carbon\CarbonInterface;
 use DateTimeInterface;
 use Exception;
@@ -11,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
 
 class InvestigationPackageManifestService
 {
-    public const DISCLAIMER = 'This package manifest summarizes included investigation materials and review activity. It is not a legal conclusion or proof of fraud.';
+    public const DISCLAIMER = ProfessionalServicesDisclaimer::TEXT;
 
     private const FORMAT_JSON = 'json';
 

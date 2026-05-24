@@ -22,6 +22,11 @@ class RexOrchestratorService
             'transactions',
             'transaction_lookup',
             'dashboard_health',
+            'controls_review',
+            'reconciliation_review',
+            'entity_graph_review',
+            'case_management',
+            'reporting',
         ];
     }
 
@@ -52,6 +57,11 @@ class RexOrchestratorService
             'transactions' => $this->transactions($companyId),
             'transaction_lookup' => $this->transactions($companyId),
             'dashboard_health' => $this->dashboardHealth($companyId),
+            'controls_review' => $this->controls($companyId),
+            'reconciliation_review' => $this->reconciliation($companyId),
+            'entity_graph_review' => $this->entityGraph($companyId),
+            'case_management' => $this->cases($companyId),
+            'reporting' => $this->reporting($companyId),
             default => null,
         };
     }
@@ -280,6 +290,44 @@ class RexOrchestratorService
         );
     }
 
+    private function entityGraph(string $companyId): array
+    {
+        $data = app(EntityGraphService::class)->getGraph($companyId);
+
+        return $this->result(
+            'entity_graph_review',
+            'entity_graph_summary',
+            'Entity Relationship Graph',
+            $data,
+            sprintf(
+                'I checked the entity graph. It includes %d entities, %d relationships, and %d relationship patterns.',
+                (int) ($data['summary']['totalNodes'] ?? 0),
+                (int) ($data['summary']['totalEdges'] ?? 0),
+                (int) ($data['summary']['totalPatterns'] ?? 0)
+            )
+        );
+    }
+
+    private function reporting(string $companyId): array
+    {
+        $data = [
+            'status' => 'preview',
+            'available_workflows' => [
+                'Generate an investigation report from a selected case.',
+                'Generate a package manifest for investigation export materials.',
+            ],
+            'required_context' => ['investigation_case_id'],
+        ];
+
+        return $this->result(
+            'reporting',
+            'reporting_readiness',
+            'Investigation Reporting',
+            $data,
+            'Investigation reporting is available from a selected case. Choose an investigation before generating report or package materials.'
+        );
+    }
+
     private function result(string $route, string $artifactType, string $title, array $data, string $message): array
     {
         return [
@@ -302,17 +350,19 @@ class RexOrchestratorService
 
         return match (true) {
             str_contains($text, 'dashboard health') || str_contains($text, 'health snapshot') => 'dashboard_health',
+            str_contains($text, 'entity graph') || str_contains($text, 'relationship graph') => 'entity_graph_review',
+            str_contains($text, 'reporting') || str_contains($text, 'investigation report') || str_contains($text, 'package manifest') => 'reporting',
             str_contains($text, 'financial health') || str_contains($text, 'overview') || str_contains($text, 'dashboard') || str_contains($text, 'risk score') => 'dashboard',
             str_contains($text, 'spend summary') || str_contains($text, 'cash flow') || str_contains($text, 'analytics') => 'analytics',
             str_contains($text, 'alert recommendation') || str_contains($text, 'recommended alert') || str_contains($text, 'recommended alerts') => 'alert_recommendations',
             str_contains($text, 'fraud alert') || str_contains($text, 'open alert') || str_contains($text, 'alerts') => 'alerts',
             str_contains($text, 'suspicious') || str_contains($text, 'flagged transaction') => 'suspicious',
-            str_contains($text, 'reconciliation') || str_contains($text, 'unmatched') => 'reconciliation',
+            str_contains($text, 'reconciliation') || str_contains($text, 'unmatched') => 'reconciliation_review',
             str_contains($text, 'overdue') || str_contains($text, 'write-off') || str_contains($text, 'invoice') || str_contains($text, 'collection') => 'ar',
             str_contains($text, 'case recommendation') || str_contains($text, 'recommended case') || str_contains($text, 'recommended cases') => 'case_recommendations',
             str_contains($text, 'vendor') => 'vendors',
-            str_contains($text, 'case') || str_contains($text, 'investigation') => 'cases',
-            str_contains($text, 'control') => 'controls',
+            str_contains($text, 'case') || str_contains($text, 'investigation') => 'case_management',
+            str_contains($text, 'control') => 'controls_review',
             str_contains($text, 'look up transaction') || str_contains($text, 'find transaction') || str_contains($text, 'lookup transaction') => 'transaction_lookup',
             str_contains($text, 'transaction') => 'transactions',
             default => null,

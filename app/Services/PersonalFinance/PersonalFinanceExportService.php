@@ -87,7 +87,7 @@ class PersonalFinanceExportService
         $section = $phpWord->addSection();
         $section->addTitle('Personal Finance Summary', 1);
         $section->addText('Generated: '.$summary['generatedAt']);
-        $section->addText('This is cash-flow analysis for the Chase account only, not a complete household accounting report.');
+        $section->addText('This is cash-flow analysis for the Chase account only, not a complete household financial record.');
 
         $section->addTitle('Totals', 2);
         $table = $section->addTable(['borderSize' => 6, 'borderColor' => '999999', 'cellMargin' => 80]);

@@ -7,6 +7,11 @@ enum RexProcess: string
     case RiskReview             = 'risk_review';
     case TransactionLookup      = 'transaction_lookup';
     case DashboardHealth        = 'dashboard_health';
+    case ControlsReview         = 'controls_review';
+    case ReconciliationReview   = 'reconciliation_review';
+    case EntityGraphReview      = 'entity_graph_review';
+    case CaseManagement         = 'case_management';
+    case Reporting              = 'reporting';
     case RecommendationReview   = 'recommendation_review';
     case InvestigationSynthesis = 'investigation_synthesis';
 
@@ -15,7 +20,13 @@ enum RexProcess: string
     {
         return match ($this) {
             self::RiskReview, self::RecommendationReview, self::InvestigationSynthesis => 'agent',
-            self::TransactionLookup, self::DashboardHealth => 'orchestrator',
+            self::TransactionLookup,
+            self::DashboardHealth,
+            self::ControlsReview,
+            self::ReconciliationReview,
+            self::EntityGraphReview,
+            self::CaseManagement,
+            self::Reporting => 'orchestrator',
         };
     }
 
@@ -49,15 +60,28 @@ enum RexProcess: string
                 'entity_relationship_risk',
                 'alert_recommendations',
             ],
-            self::TransactionLookup, self::DashboardHealth => [],
+            self::TransactionLookup,
+            self::DashboardHealth,
+            self::ControlsReview,
+            self::ReconciliationReview,
+            self::EntityGraphReview,
+            self::CaseManagement,
+            self::Reporting => [],
         };
     }
 
     public function readiness(): ProcessReadiness
     {
         return match ($this) {
-            self::RiskReview, self::TransactionLookup, self::DashboardHealth, self::RecommendationReview => ProcessReadiness::Available,
-            self::InvestigationSynthesis => ProcessReadiness::Preview,
+            self::RiskReview,
+            self::TransactionLookup,
+            self::DashboardHealth,
+            self::ControlsReview,
+            self::ReconciliationReview,
+            self::EntityGraphReview,
+            self::CaseManagement,
+            self::RecommendationReview => ProcessReadiness::Available,
+            self::Reporting, self::InvestigationSynthesis => ProcessReadiness::Preview,
         };
     }
 
@@ -70,7 +94,13 @@ enum RexProcess: string
     {
         return match ($this) {
             self::RiskReview, self::RecommendationReview, self::InvestigationSynthesis => ['create_alert'],
-            self::TransactionLookup, self::DashboardHealth => [],
+            self::TransactionLookup,
+            self::DashboardHealth,
+            self::ControlsReview,
+            self::ReconciliationReview,
+            self::EntityGraphReview,
+            self::CaseManagement,
+            self::Reporting => [],
         };
     }
 

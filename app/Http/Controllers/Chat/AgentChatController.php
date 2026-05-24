@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Chat;
 
+use App\Enums\RexProcess;
 use App\Exceptions\BrevixAgentRunFailed;
 use App\Http\Controllers\Controller;
 use App\Services\Agents\BrevixAgentRunner;
@@ -12,16 +13,13 @@ use Throwable;
 
 class AgentChatController extends Controller
 {
-    /** @var array<int, string> */
-    private const SUPPORTED_REQUESTED_ACTIONS = ['risk_review'];
-
     public function store(Request $request, BrevixAgentRunner $agentRunner): JsonResponse
     {
         $validated = $request->validate([
             'company_id' => ['required', 'uuid', 'exists:companies,id'],
             'conversation_id' => ['nullable', 'string', 'max:120'],
             'message' => ['required', 'string', 'min:1', 'max:4000'],
-            'requested_action' => ['sometimes', 'string', Rule::in(self::SUPPORTED_REQUESTED_ACTIONS)],
+            'requested_action' => ['sometimes', 'string', Rule::in($this->supportedRequestedActions())],
             'date_range' => ['sometimes', 'array:start_date,end_date'],
             'date_range.start_date' => ['required_with:date_range', 'date_format:Y-m-d', 'before_or_equal:date_range.end_date'],
             'date_range.end_date' => ['required_with:date_range', 'date_format:Y-m-d', 'after_or_equal:date_range.start_date'],
@@ -62,6 +60,7 @@ class AgentChatController extends Controller
                 'requires_review' => false,
                 'trace_id' => $e instanceof BrevixAgentRunFailed ? $e->agentRunId() : null,
                 'investigative_synthesis' => null,
+                'degraded_tools' => [],
             ], 502);
         }
     }
@@ -78,6 +77,16 @@ class AgentChatController extends Controller
             'requires_review' => $result['requires_review'],
             'trace_id' => $result['trace_id'],
             'investigative_synthesis' => $result['investigative_synthesis'] ?? null,
+            'degraded_tools' => $result['degraded_tools'] ?? [],
         ];
+    }
+
+    /** @return list<string> */
+    private function supportedRequestedActions(): array
+    {
+        return array_map(
+            fn (RexProcess $process): string => $process->value,
+            RexProcess::routableByLlm(),
+        );
     }
 }

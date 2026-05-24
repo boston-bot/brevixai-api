@@ -202,6 +202,12 @@ class AgentChatControllerTest extends TestCase
                         'output_payload' => ['tool' => 'risk-summary'],
                     ],
                 ],
+                'degraded_tools' => [[
+                    'tool' => 'entity_relationship_risk',
+                    'error_class' => 'TimeoutException',
+                    'message' => 'Entity relationship risk was unavailable.',
+                    'affected_confidence' => true,
+                ]],
                 'errors' => [],
             ]),
         ]);
@@ -225,7 +231,10 @@ class AgentChatControllerTest extends TestCase
             'requires_review',
             'trace_id',
             'investigative_synthesis',
+            'degraded_tools',
         ], array_keys($response->json()));
+        $response->assertJsonPath('degraded_tools.0.tool', 'entity_relationship_risk')
+            ->assertJsonPath('degraded_tools.0.affected_confidence', true);
         $this->assertTrue($response->json('can_create_alert'));
         $this->assertTrue($response->json('requires_review'));
         $this->assertNotEmpty($response->json('trace_id'));
@@ -285,6 +294,9 @@ class AgentChatControllerTest extends TestCase
             $vendorTool = $tools['vendor_risk'] ?? null;
             $caseTool = $tools['case_recommendations'] ?? null;
 
+            $pendingTool = $tools['pending_recommendations'] ?? null;
+            $detailTool  = $tools['transaction_detail'] ?? null;
+
             if (
                 ! is_array($aggregateTool)
                 || ! is_array($alertTool)
@@ -292,11 +304,13 @@ class AgentChatControllerTest extends TestCase
                 || ! is_array($riskTool)
                 || ! is_array($vendorTool)
                 || ! is_array($caseTool)
+                || ! is_array($pendingTool)
+                || ! is_array($detailTool)
             ) {
                 return false;
             }
 
-            return count($tools) === 8
+            return count($tools) === 10
                 && $contextTool['method'] === 'GET'
                 && $contextTool['path'] === "/api/internal/agent-tools/companies/{$company->id}/context"
                 && $contextTool['optional'] === false
@@ -317,6 +331,12 @@ class AgentChatControllerTest extends TestCase
                 && $alertTool['optional'] === true
                 && $alertTool['deterministic'] === true
                 && $alertTool['recommendation_authority'] === 'laravel'
+                && $pendingTool['path'] === "/api/internal/agent-tools/company/{$company->id}/pending-recommendations"
+                && $pendingTool['optional'] === true
+                && $pendingTool['deterministic'] === true
+                && $detailTool['path'] === "/api/internal/agent-tools/company/{$company->id}/transaction-detail"
+                && $detailTool['optional'] === true
+                && $detailTool['deterministic'] === true
                 && ! array_key_exists('database_url', $aggregateTool)
                 && ! array_key_exists('database_url', $alertTool)
                 && $policy['database_access'] === 'forbidden'
@@ -358,6 +378,7 @@ class AgentChatControllerTest extends TestCase
             'requires_review',
             'trace_id',
             'investigative_synthesis',
+            'degraded_tools',
         ], array_keys($response->json()));
         $this->assertArrayNotHasKey('exception', $response->json());
         $this->assertArrayNotHasKey('trace', $response->json());
