@@ -36,10 +36,19 @@ return [
     ],
 
     'quickbooks' => [
-        'redirect_uri' => env('QB_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost'), '/') . '/api/integrations/qbo/callback'),
+        'redirect_uri' => env('QB_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost'), '/').'/api/integrations/qbo/callback'),
         'sandbox_base_url' => env('QB_SANDBOX_BASE_URL', 'https://sandbox-quickbooks.api.intuit.com'),
         'production_base_url' => env('QB_PRODUCTION_BASE_URL', 'https://quickbooks.api.intuit.com'),
         'minor_version' => env('QB_MINOR_VERSION', '75'),
+    ],
+
+    'llm' => [
+        'provider' => env('LLM_PROVIDER', 'openai'),
+        'api_key' => env('OPENAI_API_KEY', env('LLM_API_KEY')),
+        'base_url' => env('LLM_BASE_URL', 'https://api.openai.com/v1'),
+        'model' => env('LLM_MODEL', 'chat-latest'),
+        'router_model' => env('LLM_ROUTER_MODEL', env('LLM_MODEL', 'chat-latest')),
+        'timeout' => env('LLM_TIMEOUT', 60),
     ],
 
     'brevix_agent' => [

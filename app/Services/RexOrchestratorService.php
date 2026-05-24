@@ -4,14 +4,36 @@ namespace App\Services;
 
 class RexOrchestratorService
 {
+    /** @return array<int, string> */
+    public function supportedRoutes(): array
+    {
+        return [
+            'dashboard',
+            'analytics',
+            'alerts',
+            'suspicious',
+            'reconciliation',
+            'ar',
+            'vendors',
+            'cases',
+            'controls',
+            'transactions',
+        ];
+    }
+
     public function handle(string $companyId, string $content): ?array
     {
-        $intent = $this->intent($content);
-        if (!$intent) {
+        $intent = $this->inferIntent($content);
+        if (! $intent) {
             return null;
         }
 
-        return match ($intent) {
+        return $this->handleRoute($companyId, $intent);
+    }
+
+    public function handleRoute(string $companyId, string $route): ?array
+    {
+        return match ($route) {
             'dashboard' => $this->dashboard($companyId),
             'analytics' => $this->analytics($companyId),
             'alerts' => $this->alerts($companyId),
@@ -37,9 +59,9 @@ class RexOrchestratorService
             $data,
             sprintf(
                 'I checked the dashboard data. Current risk is %d/100, with %d open alerts across %d transactions.',
-                (int)($data['riskScore'] ?? 0),
-                (int)($data['stats']['flaggedAlerts'] ?? 0),
-                (int)($data['stats']['totalTransactions'] ?? 0)
+                (int) ($data['riskScore'] ?? 0),
+                (int) ($data['stats']['flaggedAlerts'] ?? 0),
+                (int) ($data['stats']['totalTransactions'] ?? 0)
             )
         );
     }
@@ -60,8 +82,8 @@ class RexOrchestratorService
             $data,
             sprintf(
                 'I pulled the spend summary. This month shows $%s in spend across %d transactions.',
-                number_format((float)($data['summary']['totalSpend']['value'] ?? 0), 2),
-                (int)($data['summary']['transactionCount']['value'] ?? 0)
+                number_format((float) ($data['summary']['totalSpend']['value'] ?? 0), 2),
+                (int) ($data['summary']['transactionCount']['value'] ?? 0)
             )
         );
     }
@@ -110,8 +132,8 @@ class RexOrchestratorService
             array_merge($summary, ['discrepancies' => $discrepancies['discrepancies'] ?? []]),
             sprintf(
                 'I checked reconciliation. There are %d unresolved discrepancies totaling $%s.',
-                (int)($summary['unresolvedCount'] ?? 0),
-                number_format((float)($summary['unresolvedAmount'] ?? 0), 2)
+                (int) ($summary['unresolvedCount'] ?? 0),
+                number_format((float) ($summary['unresolvedAmount'] ?? 0), 2)
             )
         );
     }
@@ -127,9 +149,9 @@ class RexOrchestratorService
             $data,
             sprintf(
                 'I checked receivables. Outstanding AR is $%s, with $%s overdue and %d write-off candidates.',
-                number_format((float)($data['total_outstanding'] ?? 0), 2),
-                number_format((float)($data['total_overdue'] ?? 0), 2),
-                (int)($data['write_off_candidates'] ?? 0)
+                number_format((float) ($data['total_outstanding'] ?? 0), 2),
+                number_format((float) ($data['total_overdue'] ?? 0), 2),
+                (int) ($data['write_off_candidates'] ?? 0)
             )
         );
     }
@@ -144,7 +166,7 @@ class RexOrchestratorService
             'Top Vendors by Spend',
             ['vendors' => array_map(fn ($v) => [
                 'vendor' => $v->name ?? 'Unknown',
-                'total_amount' => (float)($v->amount ?? 0),
+                'total_amount' => (float) ($v->amount ?? 0),
                 'flagged_count' => 0,
             ], $vendors)],
             sprintf('I ranked vendors by spend and found %d vendors in the current ledger.', count($vendors))
@@ -163,7 +185,7 @@ class RexOrchestratorService
             sprintf(
                 'I checked controls health. Current grade is %s with %d unresolved violations.',
                 $data['letterGrade'] ?? 'N/A',
-                (int)($data['summary']['unresolvedViolations'] ?? 0)
+                (int) ($data['summary']['unresolvedViolations'] ?? 0)
             )
         );
     }
@@ -198,10 +220,10 @@ class RexOrchestratorService
     {
         return [
             'route' => $route,
-            'toolName' => $route . '.lookup',
+            'toolName' => $route.'.lookup',
             'message' => $message,
             'artifacts' => [[
-                'id' => $artifactType . '-' . uniqid(),
+                'id' => $artifactType.'-'.uniqid(),
                 'type' => $artifactType,
                 'title' => $title,
                 'data' => $data,
@@ -210,7 +232,7 @@ class RexOrchestratorService
         ];
     }
 
-    private function intent(string $content): ?string
+    public function inferIntent(string $content): ?string
     {
         $text = strtolower($content);
 
