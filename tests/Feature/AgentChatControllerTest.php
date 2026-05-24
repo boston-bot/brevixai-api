@@ -224,6 +224,7 @@ class AgentChatControllerTest extends TestCase
             'can_create_alert',
             'requires_review',
             'trace_id',
+            'investigative_synthesis',
         ], array_keys($response->json()));
         $this->assertTrue($response->json('can_create_alert'));
         $this->assertTrue($response->json('requires_review'));
@@ -331,6 +332,7 @@ class AgentChatControllerTest extends TestCase
             'can_create_alert',
             'requires_review',
             'trace_id',
+            'investigative_synthesis',
         ], array_keys($response->json()));
         $this->assertArrayNotHasKey('exception', $response->json());
         $this->assertArrayNotHasKey('trace', $response->json());
@@ -340,6 +342,78 @@ class AgentChatControllerTest extends TestCase
             'user_id' => $user->id,
             'status' => 'failed',
         ]);
+    }
+
+    public function test_agent_chat_passes_investigative_synthesis_when_agent_service_returns_it(): void
+    {
+        [$company, $user] = $this->createCompanyUser('Company A');
+        Sanctum::actingAs($user);
+
+        $synthesis = [
+            'investigative_summary' => 'Multiple correlated signals detected across vendor and reconciliation domains.',
+            'correlated_findings' => [
+                [
+                    'pattern' => 'vendor_entity_overlap',
+                    'title' => 'Vendor and entity overlap',
+                    'summary' => 'Shared contact details found.',
+                    'domains' => ['vendor_risk', 'entity_relationship_risk'],
+                    'signals' => [],
+                ],
+            ],
+            'reinforcing_signals' => [],
+            'conflicting_signals' => [],
+            'investigation_priority' => 'high',
+            'recommended_investigation_focus' => ['Review vendor onboarding records'],
+            'supporting_domains' => ['vendor_risk', 'reconciliation_risk'],
+            'evidence_summary' => [],
+        ];
+
+        Http::fake([
+            'http://agent.test/agent/run' => Http::response([
+                'intent' => 'fraud_pattern_search',
+                'message' => 'Patterns worth reviewing were found.',
+                'findings' => [],
+                'recommended_actions' => [],
+                'investigative_synthesis' => $synthesis,
+                'steps' => [],
+                'errors' => [],
+            ]),
+        ]);
+
+        $response = $this->postJson('/api/chat/agent/messages', [
+            'company_id' => $company->id,
+            'message' => 'Are there any correlated fraud signals this month?',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('investigative_synthesis.investigation_priority', 'high')
+            ->assertJsonPath('investigative_synthesis.investigative_summary', $synthesis['investigative_summary'])
+            ->assertJsonPath('investigative_synthesis.correlated_findings.0.pattern', 'vendor_entity_overlap');
+    }
+
+    public function test_agent_chat_returns_null_investigative_synthesis_when_agent_omits_it(): void
+    {
+        [$company, $user] = $this->createCompanyUser('Company A');
+        Sanctum::actingAs($user);
+
+        Http::fake([
+            'http://agent.test/agent/run' => Http::response([
+                'intent' => 'fraud_pattern_search',
+                'message' => 'No patterns found.',
+                'findings' => [],
+                'recommended_actions' => [],
+                'steps' => [],
+                'errors' => [],
+            ]),
+        ]);
+
+        $response = $this->postJson('/api/chat/agent/messages', [
+            'company_id' => $company->id,
+            'message' => 'Review risk.',
+        ]);
+
+        $response->assertOk();
+        $this->assertNull($response->json('investigative_synthesis'));
     }
 
     /**
