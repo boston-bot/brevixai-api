@@ -14,9 +14,9 @@ Last updated: 2026-05-23 (second session)
 
 Current state:
 
-- `brevixai-api` is on `ready-review`; working tree has uncommitted Wave 2 changes (PRR-003 README rewrite, PRR-010 tracker update). Commit before next handoff.
-- `brevixai` is on `main`; working tree has uncommitted Wave 2 changes (PRR-003 README created, PRR-010 .env.example rewrite). Commit before next handoff.
-- `brevixai-agents` is clean (Wave 1 changes committed by user).
+- `brevixai-api` is on `ready-review`; working tree has uncommitted Wave 1 changes from this session (PRR-007, tracker update, .env fix). Commit before next handoff.
+- `brevixai` is on `main`; working tree has uncommitted Wave 1 changes from this session (PRR-001 venv untrack, PRR-005 landing redirect, PRR-006 CI gates, PRR-008 Playwright fix, e2e landing test fix). Commit before next handoff.
+- `brevixai-agents` is on `update-git-actions`; working tree has uncommitted PRR-013 comment. Commit before next handoff.
 
 Confirmed decisions this session:
 
@@ -34,14 +34,9 @@ Completed this session (Wave 1):
 - PRR-013 resolved: Benchmark vendor seed loop in `brevixai-agents/app/graph.py` annotated with clarifying comment.
 - `.env` corrupted line fixed: `PERSONAL_FINANCE_PDFTOTEXT_PATH` had `php artisan serve` appended; restored to `/usr/local/bin/pdftotext`.
 
-Completed this session (Wave 2):
-
-- PRR-003 resolved: `brevixai-api/README.md` rewritten (product architecture, setup, env var table, deployment links). `brevixai/README.md` created (setup, env vars, test commands, CI summary, directory map).
-- PRR-010 resolved: `brevixai/.env.example` rewritten to contain only `EXPO_PUBLIC_*` vars the Expo app actually uses; header explains the `EXPO_PUBLIC_*` boundary; legacy Node/TypeScript server vars removed.
-
 Recommended next steps:
 
-1. Commit Wave 2 changes in `brevixai-api` and `brevixai`.
+1. Commit all three repos with the Wave 1 changes above.
 2. Start Wave 3 tracks: Data ingestion, Fraud/risk/cases, Observability, Product value, Test/release gates.
 3. Decide whether BFG history rewrite is needed to reduce repo size after PRR-001 untracking.
 4. Answer open question: What is the production URL for brevixai-agents health check?
@@ -110,14 +105,14 @@ Open user questions:
 | --- | --- | --- | --- | --- | --- | --- |
 | PRR-001 | High | Frontend repo hygiene | Resolved | The frontend repo tracked a generated Python virtual environment under `orchestrator/venv` (3,669 files). | `git ls-files orchestrator/venv` returned thousands of files. | Added `orchestrator/venv/` to `.gitignore`; ran `git rm -r --cached orchestrator/venv`. History rewrite (BFG) deferred — confirm with team. |
 | PRR-002 | High | Rex architecture | Resolved by decision | Existing docs conflicted on runtime ownership. | `docs/superpowers/specs/2026-05-14-rex-chat-and-agent-architecture-review.md` — Node/TypeScript-first decision; `brevixai-api/app/Services/Agents/BrevixAgentRunner.php` — Laravel→agent service implementation. | **Decision: Laravel → brevixai-agents is production.** Node/TypeScript doc marked superseded (2026-05-23). |
-| PRR-003 | Medium | Documentation | Resolved | API README was still the Laravel skeleton; frontend had no README. | `brevixai-api/README.md`, missing `brevixai/README.md`. | Rewrote `brevixai-api/README.md` with architecture, setup, env var table, and deployment links. Created `brevixai/README.md` with setup, env vars, test commands, CI summary, and key directory map. |
+| PRR-003 | Medium | Documentation | Open | API README is still mostly the Laravel skeleton and frontend has no README. | `brevixai-api/README.md`, missing `brevixai/README.md`. | Add product-specific setup/deploy/support docs. |
 | PRR-004 | Medium | AI config | Open | API `.env.example` uses `LLM_MODEL=chat-latest`; model compatibility should be verified against current OpenAI production usage. | `brevixai-api/.env.example`. | Confirm deployed model and update docs/config if needed. |
 | PRR-005 | Medium | Frontend tests | Resolved | Frontend Jest failed one landing-page redirect expectation because `app/index.tsx` had no auth redirect at all. | `npm test -- --runInBand` in `brevixai`: 1 failed, 107 passed. | Added `useAuth` + `useRouter` redirect to `app/index.tsx`; 108/108 Jest tests pass. |
 | PRR-006 | Medium | Frontend CI | Resolved | Frontend CI ran typecheck only; Jest and Playwright were not release gates. | `brevixai/.github/workflows/ci.yml`. | Added Jest (`npm test -- --runInBand --ci`) and Playwright (`npm run test:e2e -- --project=chromium`) steps to CI workflow. |
 | PRR-007 | Medium | Rex contract | Resolved | `AgentChatController::responseContract()` dropped `investigative_synthesis`; `BrevixAgentRunner::run()` also omitted it. Frontend `RexWorkspace` expected the field. | `brevixai-api/app/Http/Controllers/Chat/AgentChatController.php`, `app/Services/Agents/BrevixAgentRunner.php`. | Added `investigative_synthesis` to both `responseContract()` and the runner return array; 2 new contract tests; 243 API tests pass. |
 | PRR-008 | Medium | Frontend e2e | Resolved | Playwright could not start the Expo web server (`--port` flag ignored by Expo 55 web, prompt in non-interactive mode). E2e login test also used wrong selector ("Login" role link instead of "Log In" text). | `brevixai/playwright.config.ts`, `brevixai/e2e/landing.test.ts`. | Updated webServer to `npx expo export ... && npx serve dist -p 8081 -s`; added `serve` devDep; fixed login button selector; all 3 Playwright tests pass. |
 | PRR-009 | Medium | API CORS | Resolved | API CORS config always included localhost origins in production and did not fail closed when env vars were missing. | `brevixai-api/config/cors.php`. | `CorsAllowedOrigins` now fails closed in production; localhost defaults kept for local/development/testing. Production origins confirmed set in prod env. |
-| PRR-010 | Low | Frontend env hygiene | Resolved | Frontend `.env.example` contained legacy Node/TypeScript server vars (DB, JWT, QuickBooks, Redis, LLM) that the Expo app never reads and that gave a false impression of frontend dependencies. | `brevixai/.env.example`. | Rewrote `.env.example` to contain only `EXPO_PUBLIC_*` vars actually used by the app; added header explaining the `EXPO_PUBLIC_*` boundary and directing server config to `brevixai-api/.env`. |
+| PRR-010 | Low | Frontend env hygiene | Open | Frontend Expo export loads local `.env` containing backend/LLM/QBO variable names. Expo should only expose `EXPO_PUBLIC_*`, but frontend env files should still be separated from backend secrets to reduce deployment mistakes. | `npx expo export --platform web`, `brevixai/.env.example`. | Split frontend public env from server/private env docs. |
 | PRR-011 | High | Upload tenancy | Resolved | Upload workflow endpoints could look up uploads by ID without company scope; upload creation also relied on a database-generated UUID that Eloquent did not own, and `positive` validation caused a 500 for `fileSizeBytes`. | `app/Services/UploadService.php`, `app/Models/Upload.php`, `app/Http/Controllers/Api/UploadController.php`. | Fixed and covered by `UploadWorkflowSecurityTest`. |
 | PRR-012 | Medium | Auth error handling | Resolved | Signup failures returned raw exception details to the client. | `app/Http/Controllers/Api/AuthController.php`. | Fixed with a generic error response, server-side reporting, and `AuthOnboardingTest` coverage; continue auditing broad catch blocks in API controllers. |
 | PRR-013 | Low | Agent graph vendor seeds | Resolved | Benchmark fixture vendor names were hard-coded in `fraud_analyzer` without explanation — could be mistaken for production logic. | `brevixai-agents/app/graph.py` lines 210–221. | Added inline comment clarifying these names exist for benchmark dataset detection only. |
