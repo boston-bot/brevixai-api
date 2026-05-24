@@ -280,11 +280,34 @@ class AgentChatControllerTest extends TestCase
 
             $aggregateTool = $tools['aggregate_risk_summary'] ?? null;
             $alertTool = $tools['alert_recommendations'] ?? null;
-            if (! is_array($aggregateTool) || ! is_array($alertTool)) {
+            $contextTool = $tools['company_context'] ?? null;
+            $riskTool = $tools['risk_summary'] ?? null;
+            $vendorTool = $tools['vendor_risk'] ?? null;
+            $caseTool = $tools['case_recommendations'] ?? null;
+
+            if (
+                ! is_array($aggregateTool)
+                || ! is_array($alertTool)
+                || ! is_array($contextTool)
+                || ! is_array($riskTool)
+                || ! is_array($vendorTool)
+                || ! is_array($caseTool)
+            ) {
                 return false;
             }
 
-            return $aggregateTool['method'] === 'GET'
+            return count($tools) === 8
+                && $contextTool['method'] === 'GET'
+                && $contextTool['path'] === "/api/internal/agent-tools/companies/{$company->id}/context"
+                && $contextTool['optional'] === false
+                && $contextTool['deterministic'] === true
+                && $riskTool['method'] === 'GET'
+                && $riskTool['path'] === "/api/internal/agent-tools/companies/{$company->id}/risk-summary"
+                && $riskTool['optional'] === false
+                && $riskTool['deterministic'] === true
+                && $vendorTool['path'] === "/api/internal/agent-tools/company/{$company->id}/vendor-risk"
+                && $caseTool['path'] === "/api/internal/agent-tools/company/{$company->id}/case-recommendations"
+                && $aggregateTool['method'] === 'GET'
                 && $aggregateTool['path'] === "/api/internal/agent-tools/company/{$company->id}/aggregate-risk-summary"
                 && $aggregateTool['optional'] === true
                 && $aggregateTool['deterministic'] === true
@@ -298,7 +321,9 @@ class AgentChatControllerTest extends TestCase
                 && ! array_key_exists('database_url', $alertTool)
                 && $policy['database_access'] === 'forbidden'
                 && $policy['autonomous_actions'] === 'forbidden'
-                && $policy['score_recalculation'] === 'forbidden';
+                && $policy['score_recalculation'] === 'forbidden'
+                && $policy['tool_surface'] === 'api/internal/agent-tools'
+                && $policy['mutating_tools'] === 'forbidden';
         });
     }
 

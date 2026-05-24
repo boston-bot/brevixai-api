@@ -2,7 +2,9 @@
 
 namespace App\Services\Agents;
 
+use App\Enums\RexProcess;
 use App\Exceptions\BrevixAgentRunFailed;
+use App\Services\Agents\AgentToolRegistry;
 use App\Models\AgentActionApproval;
 use App\Models\AgentRun;
 use App\Models\AgentStep;
@@ -72,7 +74,7 @@ class BrevixAgentRunner
                 'date_range' => $input['date_range'] ?? null,
                 'max_response_size' => $maxResponseSize,
                 'page_context' => $input['page_context'] ?? (object) [],
-                'optional_deterministic_tools' => $this->optionalDeterministicTools($companyId),
+                'optional_deterministic_tools' => $this->optionalDeterministicTools($companyId, $input['requested_action'] ?? 'risk_review'),
                 'tool_policy' => $this->toolPolicy(),
             ]);
 
@@ -240,32 +242,41 @@ class BrevixAgentRunner
     }
 
     /**
-     * Advertise approved Laravel tool endpoints to the agent service without exposing database access.
+     * Advertise only the tool endpoints declared by the process registry for this requested action.
+     * Paths and metadata are sourced from AgentToolRegistry to stay in sync with the parity gate.
      *
      * @return array<string, array<string, mixed>>
      */
-    private function optionalDeterministicTools(string $companyId): array
+    private function optionalDeterministicTools(string $companyId, string $requestedAction): array
     {
-        return [
-            'aggregate_risk_summary' => [
-                'method' => 'GET',
-                'path' => "/api/internal/agent-tools/company/{$companyId}/aggregate-risk-summary",
-                'optional' => true,
-                'deterministic' => true,
-                'purpose' => 'Use during fraud or risk analysis when a cross-domain deterministic score and evidence summary would improve the response.',
-                'score_authority' => 'laravel',
-                'requires_user_context_header' => true,
-            ],
-            'alert_recommendations' => [
-                'method' => 'GET',
-                'path' => "/api/internal/agent-tools/company/{$companyId}/alert-recommendations",
-                'optional' => true,
-                'deterministic' => true,
-                'purpose' => 'Use during fraud or risk analysis when deterministic alert recommendation drafts would improve the response.',
-                'recommendation_authority' => 'laravel',
-                'requires_user_context_header' => true,
-            ],
+        $allowedKeys = RexProcess::resolveOrDefault($requestedAction)->tools();
+
+        $purposes = [
+            'company_context'          => ['optional' => false, 'purpose' => 'Load company, data-source, user-role, dashboard, and bounded transaction context through Laravel tenant checks.', 'data_authority' => 'laravel'],
+            'risk_summary'             => ['optional' => false, 'purpose' => 'Use as the primary deterministic risk score and top-driver source for risk review responses.', 'score_authority' => 'laravel'],
+            'vendor_risk'              => ['optional' => true, 'purpose' => 'Use for vendor concentration, vendor onboarding, payment-pattern, and named-vendor risk analysis.', 'score_authority' => 'laravel'],
+            'reconciliation_risk'      => ['optional' => true, 'purpose' => 'Use for bank-to-ledger mismatch, stale discrepancy, and reconciliation-drift analysis.', 'score_authority' => 'laravel'],
+            'entity_relationship_risk' => ['optional' => true, 'purpose' => 'Use for employee/vendor overlap, shared contact data, duplicate entity, and related-party risk analysis.', 'score_authority' => 'laravel'],
+            'aggregate_risk_summary'   => ['optional' => true, 'purpose' => 'Use during fraud or risk analysis when a cross-domain deterministic score and evidence summary would improve the response.', 'score_authority' => 'laravel'],
+            'alert_recommendations'    => ['optional' => true, 'purpose' => 'Use during fraud or risk analysis when deterministic alert recommendation drafts would improve the response.', 'recommendation_authority' => 'laravel'],
+            'case_recommendations'     => ['optional' => true, 'purpose' => 'Use during risk analysis when deterministic case recommendation drafts would improve the response.', 'recommendation_authority' => 'laravel'],
         ];
+
+        $keys = empty($allowedKeys) ? array_keys($purposes) : $allowedKeys;
+
+        $tools = [];
+        foreach ($keys as $key) {
+            $path = AgentToolRegistry::path($key, $companyId);
+            if ($path === null || ! isset($purposes[$key])) {
+                continue;
+            }
+            $tools[$key] = array_merge(
+                ['method' => 'GET', 'path' => $path, 'deterministic' => true, 'requires_user_context_header' => true],
+                $purposes[$key]
+            );
+        }
+
+        return $tools;
     }
 
     /** @return array<string, string> */
@@ -277,6 +288,8 @@ class BrevixAgentRunner
             'alert_creation' => 'recommendation_only',
             'alert_recommendation_approval' => 'authenticated_user_only',
             'score_recalculation' => 'forbidden',
+            'tool_surface' => 'api/internal/agent-tools',
+            'mutating_tools' => 'forbidden',
         ];
     }
 

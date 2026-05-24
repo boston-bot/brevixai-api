@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Upload;
+use App\Models\UploadRowError;
 use App\Services\UploadService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -170,6 +172,29 @@ class UploadController extends Controller
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
         }
+    }
+
+    /**
+     * GET /api/uploads/{id}/errors
+     */
+    public function errors(Request $request, string $id): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        $upload = Upload::where('id', $id)->where('company_id', $companyId)->first();
+        if (! $upload) {
+            return response()->json(['error' => 'Upload not found'], 404);
+        }
+
+        $errors = UploadRowError::where('upload_id', $id)
+            ->where('company_id', $companyId)
+            ->orderBy('source_row_number')
+            ->get(['id', 'source_sheet_name', 'source_row_number', 'canonical_field_key', 'severity', 'error_code', 'message', 'raw_value', 'created_at']);
+
+        return response()->json(['errors' => $errors]);
     }
 
     /**
