@@ -209,6 +209,7 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     });
 
     Route::prefix('alerts')->group(function () {
+        Route::post('/run', [AlertRecommendationController::class, 'run']);
         Route::get('/', [AlertController::class, 'index']);
         Route::get('/rules', [AlertController::class, 'rules']);
         Route::get('/groups', [AlertController::class, 'groups']);

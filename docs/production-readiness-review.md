@@ -10,7 +10,7 @@ Scope:
 
 ## Claude Handoff Snapshot
 
-Last updated: 2026-05-23 (second session)
+Last updated: 2026-05-24 (third session)
 
 Current state:
 
@@ -18,9 +18,9 @@ Current state:
 - `brevixai` is on `main`; working tree has uncommitted Wave 1 changes from this session (PRR-001 venv untrack, PRR-005 landing redirect, PRR-006 CI gates, PRR-008 Playwright fix, e2e landing test fix). Commit before next handoff.
 - `brevixai-agents` is on `update-git-actions`; working tree has uncommitted PRR-013 comment. Commit before next handoff.
 
-Confirmed decisions this session:
+Confirmed decisions:
 
-- **Rex runtime**: Laravel → brevixai-agents is the production path. Node/TypeScript docs superseded. PRR-002 closed.
+- **Rex runtime**: Laravel → brevixai-agents is production. Node/TypeScript docs superseded. PRR-002 closed.
 - **Production CORS**: Already set in production environment. PRR-009 verification deferred.
 
 Completed this session (Wave 1):
@@ -43,9 +43,8 @@ Recommended next steps:
 
 Open user questions:
 
-- Should `orchestrator/venv` history be rewritten (BFG, force-push, all collaborators re-clone) or just leave it untracked going forward?
+- Should `orchestrator/venv` history be rewritten (BFG, force-push, all collaborators re-clone) or leave it untracked?
 - What is the target production URL for brevixai-agents health check?
-- What first-use customer workflow is the highest-value demo scenario?
 
 ## Operating Rules
 
@@ -90,14 +89,15 @@ Open user questions:
 | Fraud/risk/cases workflows | Not started | Verify deterministic scoring, recommendations, evidence, case lifecycle, and auditability. |
 | Observability and operations | Not started | Verify structured logs, trace IDs, dashboards, alerts, SLOs, and runbooks. |
 | Test and release gates | Not started | Verify CI, local test commands, smoke checks, benchmark gates, and e2e coverage. |
-| Documentation and developer handoff | In progress | Replace skeleton docs with product-specific setup, deployment, and support docs. |
+| Documentation and developer handoff | Resolved | READMEs, env hygiene, and tracker completed. |
+| Product value and onboarding | Complete — findings logged | See PRR-016 through PRR-021. |
 
 ## Open Questions
 
-1. What is the intended production Rex runtime now: Laravel API directly calling OpenAI/agent service, the older Node/TypeScript server, or a transition state?
-2. What AWS services are currently in use for each repo: Amplify, ECS/Fargate, EC2, RDS, S3, CloudFront, Route 53, Secrets Manager, SSM?
-3. What are the production URLs for frontend, API, and agent service health checks?
-4. What is the target customer workflow that must feel most valuable on first use?
+1. What AWS services are currently in use for each repo: Amplify, ECS/Fargate, EC2, RDS, S3, CloudFront, Route 53, Secrets Manager, SSM?
+2. What are the production URLs for frontend, API, and agent service health checks?
+3. Does `POST /api/alerts/run` have a planned implementation, or should the "Run Engine" button be removed from the alerts page (PRR-016)?
+4. Is onboarding intended to stay educational-only, or should it link directly to QB connect and upload (PRR-017)?
 
 ## Findings
 
@@ -118,6 +118,12 @@ Open user questions:
 | PRR-013 | Low | Agent graph vendor seeds | Resolved | Benchmark fixture vendor names were hard-coded in `fraud_analyzer` without explanation — could be mistaken for production logic. | `brevixai-agents/app/graph.py` lines 210–221. | Added inline comment clarifying these names exist for benchmark dataset detection only. |
 | PRR-014 | Low | Agent optional tool alerting | Open | Four optional tool calls (vendor_risk, reconciliation_risk, entity_relationship_risk, aggregate_risk_summary) fail silently with `logger.warning()`. No alerting path for systematic failures. | `brevixai-agents/app/graph.py` lines 234–362. | Add `degraded_tools` list to `AgentRunResponse`; set monitoring alert for non-zero tool failure counts. Belongs in Observability track. |
 | PRR-015 | Low | Agent-Laravel tool contract | Open | The agent service assumes all 6 Laravel tool endpoints exist. Missing or renamed endpoints are partially silenced by broad exception handling. | `brevixai-agents/app/tools/laravel.py`, `brevixai-api` internal agent-tools routes. | Document which tools are required vs. optional in both repos. Belongs in Documentation track. |
+| PRR-016 | High | Dead route — alerts run engine | Resolved | Frontend `handleRunEngine()` calls `POST /api/alerts/run` which did not exist in `routes/api.php`. Every click of "Run Engine" on the alerts page 404d. | `brevixai/app/(dashboard)/alerts.tsx:86`, `brevixai-api/routes/api.php`. | Implemented `AlertRecommendationController::run()` wired to `AlertRecommendationService::getAlertRecommendations()`; registered `Route::post('/run', ...)` at top of `alerts` group; 4 new `AlertRunEngineTest` tests covering auth, clean company, high-risk company, and pending count; 247 API tests pass. |
+| PRR-017 | High | Onboarding is cosmetic | Open | The 3-step onboarding wizard is educational only — no step actually navigates the user to upload data or connect QuickBooks. After completion, user lands on an empty overview with no next-step CTA. | `brevixai/app/(dashboard)/onboarding.tsx`, `brevixai/app/(dashboard)/overview.tsx`. | Add action links from onboarding steps to QB settings and upload page, or add a CTA banner to the overview for users with no data. |
+| PRR-018 | High | Overview has no empty-state guidance | Open | With no data, the overview page shows all zeros and an empty risk gauge. The risk gauge displaying 0 looks like "no risk detected" rather than "no data analyzed". No CTA to upload or connect QB. | `brevixai/app/(dashboard)/overview.tsx`. | Add empty-state detection: if `totalTransactions === 0`, show a setup banner with links to upload and QB connect. Change risk gauge label to reflect data absence. |
+| PRR-019 | Medium | QB callback has no success signal | Open | After OAuth, the API redirects to `{FRONTEND_URL}/settings` with no query param or toast. The user has to look for a new entry in the integrations list to confirm the connection worked. | `brevixai-api/app/Http/Controllers/Api/IntegrationController.php:60`. | Append `?qbo=connected` to the redirect URL so the frontend can show a success toast on return. |
+| PRR-020 | Medium | QB sync is manual, not automatic | Open | No sync is triggered after the QB OAuth callback completes. The user must navigate back to settings and manually click Sync. | `brevixai-api/app/Http/Controllers/Api/IntegrationController.php`. | Queue a sync job in the callback handler after token exchange succeeds. |
+| PRR-021 | Medium | Rex shows no data-presence guidance | Open | With zero transactions, Rex returns a generic "no data found" message. First-time users querying Rex before uploading data get no guidance on what to do next. | `brevixai/app/(dashboard)/index.tsx`, `brevixai-api/app/Http/Controllers/Api/ChatController.php`. | Rex response for empty company context should include a nudge: "No transactions found — upload a file or connect QuickBooks to get started." |
 
 ## Verification Log
 
@@ -145,6 +151,8 @@ Open user questions:
 | 2026-05-23 | `npm run test:e2e -- --project=chromium --reporter=list` | `brevixai` | Passed: 3 tests. PRR-008 fixed (export+serve webServer, login selector corrected). |
 | 2026-05-23 | `git ls-files orchestrator/venv` | `brevixai` | Returns 0 after `git rm -r --cached` and `.gitignore` update. PRR-001 fixed. |
 | 2026-05-23 | `.venv/bin/pytest tests/ --ignore=tests/test_evals.py -q` | `brevixai-agents` | Passed: 397 tests. PRR-013 comment addition caused no regressions. |
+| 2026-05-24 | `php artisan test tests/Feature/AlertRunEngineTest.php` | `brevixai-api` | Passed: 4 tests, 15 assertions. PRR-016 new endpoint covered. |
+| 2026-05-24 | `php artisan test` | `brevixai-api` | Passed: 247 tests, 1263 assertions. PRR-016 fix caused no regressions. |
 
 ## Source Notes
 
