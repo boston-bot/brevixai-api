@@ -592,9 +592,19 @@ class QboService
                 ->delete();
         }
 
-        DB::table('alerts')->where('company_id', $companyId)->delete();
-        DB::table('alert_groups')->where('company_id', $companyId)->delete();
-        
+        // Only clear alerts when no transaction data remains for the company.
+        // If other QB realms or file uploads still have data, the scoring engine
+        // will rebuild alerts on its next run without losing coverage from surviving sources.
+        $hasRemainingData = DB::table('qbo_transactions')->where('company_id', $companyId)->exists()
+            || DB::table('transactions')->where('company_id', $companyId)->exists()
+            || DB::table('gnucash_transactions')->where('company_id', $companyId)->exists();
+
+        if (! $hasRemainingData) {
+            DB::table('alerts')->where('company_id', $companyId)->delete();
+            DB::table('alert_groups')->where('company_id', $companyId)->delete();
+            DB::table('alert_recommendations')->where('company_id', $companyId)->delete();
+        }
+
         // We would dispatch a RulesEngine job here to rebuild alerts on remaining data
     }
 
