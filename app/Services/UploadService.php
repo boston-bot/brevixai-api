@@ -2,16 +2,20 @@
 
 namespace App\Services;
 
+use App\Jobs\PromoteUploadJob;
+use App\Jobs\ScanUploadJob;
+use App\Jobs\ValidateUploadJob;
 use App\Models\Upload;
-use Illuminate\Support\Facades\DB;
 use Exception;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class UploadService
 {
     private UploadStorageService $storage;
 
     public const SUPPORTED_IMPORT_TYPES = [
-        'qbo_journal', 'bank_statement', 'credit_card_statement', 'gnucash_export', 'generic_transactions'
+        'transaction_ledger', 'ap_invoice_register', 'ar_aging',
     ];
 
     public function __construct(UploadStorageService $storage)
@@ -24,14 +28,15 @@ class UploadService
         $originalFilename = $data['originalFilename'];
         $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
 
-        if (!in_array($extension, ['csv', 'xlsx'])) {
-            throw new Exception("Only .csv and .xlsx files are supported", 400);
+        if (! in_array($extension, ['csv', 'xlsx'])) {
+            throw new Exception('Only .csv and .xlsx files are supported', 400);
         }
 
         $claimedContentType = $data['claimedContentType'] ?? 'application/octet-stream';
         $fileSizeBytes = $data['fileSizeBytes'] ?? null;
 
         $upload = Upload::create([
+            'id' => (string) Str::uuid(),
             'company_id' => $companyId,
             'uploaded_by' => $userId,
             'import_type' => $data['importType'],
@@ -72,15 +77,19 @@ class UploadService
             'acceptedConstraints' => [
                 'maxFileSizeBytes' => 104857600, // 100MB
                 'acceptedExtensions' => ['.csv', '.xlsx'],
-            ]
+            ],
         ];
     }
 
     public function completeDirectUpload(string $companyId, string $userId, string $uploadId): array
     {
         $upload = Upload::where('id', $uploadId)->where('company_id', $companyId)->first();
-        if (!$upload) throw new Exception("Upload not found", 404);
-        if (!$upload->quarantine_key) throw new Exception("Upload is missing a quarantine object key", 400);
+        if (! $upload) {
+            throw new Exception('Upload not found', 404);
+        }
+        if (! $upload->quarantine_key) {
+            throw new Exception('Upload is missing a quarantine object key', 400);
+        }
 
         $stat = $this->storage->statStoredObject($upload->quarantine_key);
         $size = $stat['size'] ?? ($upload->file_size_bytes ?: 0);
@@ -98,7 +107,7 @@ class UploadService
             'fileSizeBytes' => $size,
         ]);
 
-        \App\Jobs\ScanUploadJob::dispatch($upload->id, $companyId, $userId);
+        ScanUploadJob::dispatch($upload->id, $companyId, $userId);
 
         return [
             'uploadId' => $upload->id,
@@ -110,11 +119,13 @@ class UploadService
     public function getDetail(string $companyId, string $uploadId): ?array
     {
         $upload = Upload::where('id', $uploadId)->where('company_id', $companyId)->first();
-        if (!$upload) return null;
+        if (! $upload) {
+            return null;
+        }
 
         // Fetch related inspection, mapping, validation, and batch (stubbed for brevity as per architecture constraints,
         // typically joining on upload_inspections, upload_mapping_versions, etc.)
-        
+
         return [
             'id' => $upload->id,
             'importType' => $upload->import_type,
@@ -147,10 +158,10 @@ class UploadService
                     'id' => $upload->id,
                     'importType' => $upload->import_type,
                     'filename' => $upload->original_filename ?: $upload->filename,
-                    'fileSizeBytes' => (int)($upload->file_size_bytes ?: ($upload->file_size ?: 0)),
+                    'fileSizeBytes' => (int) ($upload->file_size_bytes ?: ($upload->file_size ?: 0)),
                     'status' => $upload->status,
                     'statusDetail' => $upload->status_detail,
-                    'rowCount' => (int)($upload->row_count ?: 0),
+                    'rowCount' => (int) ($upload->row_count ?: 0),
                     'createdAt' => $upload->created_at,
                     'uploadedAt' => $upload->uploaded_at,
                     'promotedAt' => $upload->promoted_at,
@@ -161,7 +172,9 @@ class UploadService
     public function delete(string $companyId, string $userId, string $uploadId): bool
     {
         $upload = Upload::where('id', $uploadId)->where('company_id', $companyId)->first();
-        if (!$upload) throw new Exception("Upload not found", 404);
+        if (! $upload) {
+            throw new Exception('Upload not found', 404);
+        }
 
         if ($upload->quarantine_key) {
             try {
@@ -197,10 +210,19 @@ class UploadService
 
     public function getPreview(string $companyId, string $uploadId): array
     {
-        $inspection = DB::table('upload_inspections')->where('upload_id', $uploadId)->orderBy('created_at', 'desc')->first();
-        if (!$inspection) throw new Exception("Upload inspection is not ready yet", 409);
+        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        if (! $upload) {
+            throw new Exception('Upload not found', 404);
+        }
 
-        $upload = Upload::find($uploadId);
+        $inspection = DB::table('upload_inspections')
+            ->where('upload_id', $uploadId)
+            ->where('company_id', $companyId)
+            ->orderBy('created_at', 'desc')
+            ->first();
+        if (! $inspection) {
+            throw new Exception('Upload inspection is not ready yet', 409);
+        }
 
         return [
             'uploadId' => $uploadId,
@@ -215,8 +237,10 @@ class UploadService
 
     public function saveMapping(string $companyId, string $userId, string $uploadId, array $data): array
     {
-        $upload = Upload::find($uploadId);
-        if (!$upload) throw new Exception("Upload not found", 404);
+        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        if (! $upload) {
+            throw new Exception('Upload not found', 404);
+        }
 
         $nextVersion = DB::table('upload_mapping_versions')->where('upload_id', $uploadId)->max('version_number') + 1;
 
@@ -243,20 +267,30 @@ class UploadService
 
     public function queueValidation(string $companyId, string $userId, string $uploadId): array
     {
-        $upload = Upload::find($uploadId);
-        if (!$upload || !$upload->latest_mapping_version_id) throw new Exception("Upload mapping is missing", 409);
+        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        if (! $upload) {
+            throw new Exception('Upload not found', 404);
+        }
+        if (! $upload->latest_mapping_version_id) {
+            throw new Exception('Upload mapping is missing', 409);
+        }
 
-        \App\Jobs\ValidateUploadJob::dispatch($uploadId, $companyId, $userId);
+        ValidateUploadJob::dispatch($uploadId, $companyId, $userId);
 
         return ['status' => 'validation_pending', 'statusDetail' => 'Validation has been queued.'];
     }
 
     public function queuePromotion(string $companyId, string $userId, string $uploadId): array
     {
-        $upload = Upload::find($uploadId);
-        if (!$upload || $upload->status !== 'validated') throw new Exception("Upload must be validated before promotion", 409);
+        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        if (! $upload) {
+            throw new Exception('Upload not found', 404);
+        }
+        if ($upload->status !== 'validated') {
+            throw new Exception('Upload must be validated before promotion', 409);
+        }
 
-        \App\Jobs\PromoteUploadJob::dispatch($uploadId, $companyId, $userId);
+        PromoteUploadJob::dispatch($uploadId, $companyId, $userId);
 
         return ['status' => 'promotion_pending', 'statusDetail' => 'Promotion has been queued.'];
     }
@@ -264,5 +298,12 @@ class UploadService
     private function writeAuditLog(string $companyId, string $userId, string $eventType, string $uploadId, array $payload = []): void
     {
         // Minimal stub
+    }
+
+    private function findCompanyUpload(string $companyId, string $uploadId): ?Upload
+    {
+        return Upload::where('id', $uploadId)
+            ->where('company_id', $companyId)
+            ->first();
     }
 }
