@@ -2,14 +2,18 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\BrevixAgentRunFailed;
 use App\Http\Controllers\Controller;
+use App\Services\Agents\BrevixAgentRunner;
 use App\Services\ChatService;
 use App\Services\LlmService;
+use App\Services\RexChatRouterService;
 use App\Services\RexOrchestratorService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 class ChatController extends Controller
 {
@@ -26,10 +30,13 @@ class ChatController extends Controller
     public function store(Request $request): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $session = $this->chatService->createSession($companyId, $request->user()->id, $request->input('title'));
+
             return response()->json($session, 201);
         } catch (Exception $e) {
             return response()->json(['error' => 'Failed to create session'], 500);
@@ -42,9 +49,12 @@ class ChatController extends Controller
     public function index(Request $request): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $sessions = $this->chatService->listSessions($companyId);
+
         return response()->json($sessions);
     }
 
@@ -54,10 +64,14 @@ class ChatController extends Controller
     public function show(Request $request, string $sessionId): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $session = $this->chatService->getSession($companyId, $sessionId);
-        if (!$session) return response()->json(['error' => 'Session not found'], 404);
+        if (! $session) {
+            return response()->json(['error' => 'Session not found'], 404);
+        }
 
         return response()->json($session);
     }
@@ -68,10 +82,14 @@ class ChatController extends Controller
     public function destroy(Request $request, string $sessionId): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $success = $this->chatService->deleteSession($companyId, $sessionId);
-        if (!$success) return response()->json(['error' => 'Session not found'], 404);
+        if (! $success) {
+            return response()->json(['error' => 'Session not found'], 404);
+        }
 
         return response()->json(['success' => true, 'id' => $sessionId]);
     }
@@ -83,14 +101,20 @@ class ChatController extends Controller
     {
         $companyId = $request->user()->company_id;
         $userId = $request->user()->id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $content = $request->input('content');
-        if (!$content) return response()->json(['error' => 'Content is required'], 400);
+        if (! $content) {
+            return response()->json(['error' => 'Content is required'], 400);
+        }
 
         // Verify session ownership
         $session = $this->chatService->getSession($companyId, $sessionId);
-        if (!$session) return response()->json(['error' => 'Session not found'], 404);
+        if (! $session) {
+            return response()->json(['error' => 'Session not found'], 404);
+        }
 
         try {
             $this->chatService->checkAndIncrementQuota($companyId);
@@ -101,10 +125,12 @@ class ChatController extends Controller
         $this->chatService->logUserMessage($companyId, $sessionId, $content);
 
         $llmService = app(LlmService::class);
+        $chatRouter = app(RexChatRouterService::class);
         $orchestrator = app(RexOrchestratorService::class);
+        $agentRunner = app(BrevixAgentRunner::class);
 
         // Set up SSE response
-        return new StreamedResponse(function () use ($companyId, $userId, $sessionId, $content, $llmService, $orchestrator) {
+        return new StreamedResponse(function () use ($companyId, $userId, $sessionId, $content, $llmService, $chatRouter, $orchestrator, $agentRunner) {
             // Turn off output buffering for PHP/Nginx
             if (function_exists('apache_setenv')) {
                 apache_setenv('no-gzip', '1');
@@ -115,80 +141,41 @@ class ChatController extends Controller
             $accumulatedContent = '';
 
             try {
-                echo "data: " . json_encode(['type' => 'run.started', 'payload' => ['sessionId' => $sessionId]]) . "\n\n";
-                ob_flush();
-                flush();
+                $this->emitSse('run.started', ['sessionId' => $sessionId]);
 
-                $orchestrated = $orchestrator->handle($companyId, $content);
-                if ($orchestrated) {
-                    echo "data: " . json_encode(['type' => 'route.selected', 'payload' => ['route' => $orchestrated['route']]]) . "\n\n";
-                    ob_flush();
-                    flush();
+                $session = $this->chatService->getSession($companyId, $sessionId);
+                $messages = $this->messagesForLlm($session['messages'] ?? []);
+                $routeDecision = $chatRouter->route($content, $messages);
 
-                    echo "data: " . json_encode(['type' => 'tool.started', 'payload' => ['toolName' => $orchestrated['toolName']]]) . "\n\n";
-                    ob_flush();
-                    flush();
+                if ($routeDecision['mode'] === 'orchestrator') {
+                    $orchestrated = $orchestrator->handleRoute($companyId, (string) $routeDecision['route']);
+                    if ($orchestrated) {
+                        $this->emitOrchestratedResult($companyId, $sessionId, $orchestrated, $routeDecision['reason']);
 
-                    foreach ($orchestrated['artifacts'] as $artifact) {
-                        echo "data: " . json_encode(['type' => 'artifact.upsert', 'payload' => $artifact]) . "\n\n";
-                        ob_flush();
-                        flush();
+                        return;
                     }
+                }
 
-                    echo "data: " . json_encode(['type' => 'tool.completed', 'payload' => ['toolName' => $orchestrated['toolName'], 'success' => true, 'rowCount' => count($orchestrated['artifacts'])]]) . "\n\n";
-                    ob_flush();
-                    flush();
+                if ($routeDecision['mode'] === 'agent') {
+                    $this->emitAgentResult($companyId, $userId, $sessionId, $content, $agentRunner, $routeDecision['reason']);
 
-                    $accumulatedContent = $orchestrated['message'];
-                    echo "data: " . json_encode(['type' => 'message.delta', 'payload' => ['content' => $accumulatedContent]]) . "\n\n";
-                    ob_flush();
-                    flush();
-
-                    $structuredPayload = [
-                        'routedTo' => $orchestrated['route'],
-                        'artifacts' => $orchestrated['artifacts'],
-                    ];
-                    $this->chatService->logAssistantMessage($companyId, $sessionId, $accumulatedContent, $structuredPayload);
-
-                    echo "data: " . json_encode(['type' => 'message.completed', 'payload' => ['routedTo' => $orchestrated['route'], 'artifactCount' => count($orchestrated['artifacts']), 'actionCount' => 0]]) . "\n\n";
-                    ob_flush();
-                    flush();
                     return;
                 }
 
-                echo "data: " . json_encode(['type' => 'route.selected', 'payload' => ['route' => 'direct']]) . "\n\n";
-                ob_flush();
-                flush();
+                $this->emitSse('route.selected', ['route' => 'direct', 'reason' => $routeDecision['reason']]);
 
-                // Fetch full session history so LLM has context
-                $session = $this->chatService->getSession($companyId, $sessionId);
-                $messages = array_map(function($msg) {
-                    return [
-                        'role' => $msg['role'],
-                        'content' => $msg['content']
-                    ];
-                }, $session['messages'] ?? []);
-
-                $systemPrompt = "You are Rex, an expert AI financial auditor built into Brevix AI. You are confident, direct, and concise — like a senior partner at a forensic accounting firm. Answer the question clearly and succinctly. If the user is asking about something that requires their company data, explain that you'll need to look it up and suggest they rephrase as a specific investigation question. Keep responses under 200 words unless a detailed explanation is needed.";
-
-                $llmService->streamChat($messages, $systemPrompt, function($chunk) use (&$accumulatedContent) {
+                $llmService->streamChat($messages, $this->rexSystemPrompt(), function ($chunk) use (&$accumulatedContent) {
                     $accumulatedContent .= $chunk;
-                    echo "data: " . json_encode(['type' => 'message.delta', 'payload' => ['content' => $chunk]]) . "\n\n";
-                    ob_flush();
-                    flush();
+                    $this->emitSse('message.delta', ['content' => $chunk]);
                 });
 
                 // Finalize and persist assistant response
                 $this->chatService->logAssistantMessage($companyId, $sessionId, $accumulatedContent, null);
 
-                echo "data: " . json_encode(['type' => 'message.completed', 'payload' => ['routedTo' => 'direct', 'artifactCount' => 0, 'actionCount' => 0]]) . "\n\n";
-                ob_flush();
-                flush();
+                $this->emitSse('message.completed', ['routedTo' => 'direct', 'artifactCount' => 0, 'actionCount' => 0]);
 
-            } catch (\Exception $e) {
-                echo "data: " . json_encode(['type' => 'error', 'payload' => ['message' => $e->getMessage()]]) . "\n\n";
-                ob_flush();
-                flush();
+            } catch (Throwable $e) {
+                $this->emitSse('error', ['message' => $e->getMessage()]);
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',
@@ -198,15 +185,184 @@ class ChatController extends Controller
         ]);
     }
 
+    private function emitOrchestratedResult(string $companyId, string $sessionId, array $orchestrated, string $reason): void
+    {
+        $this->emitSse('route.selected', ['route' => $orchestrated['route'], 'reason' => $reason]);
+        $this->emitSse('tool.started', ['toolName' => $orchestrated['toolName']]);
+
+        foreach ($orchestrated['artifacts'] as $artifact) {
+            $this->emitSse('artifact.upsert', $artifact);
+        }
+
+        $this->emitSse('tool.completed', [
+            'toolName' => $orchestrated['toolName'],
+            'success' => true,
+            'rowCount' => count($orchestrated['artifacts']),
+        ]);
+
+        $content = $orchestrated['message'];
+        $this->emitSse('message.delta', ['content' => $content]);
+
+        $structuredPayload = [
+            'routedTo' => $orchestrated['route'],
+            'artifacts' => $orchestrated['artifacts'],
+        ];
+        $this->chatService->logAssistantMessage($companyId, $sessionId, $content, $structuredPayload);
+
+        $this->emitSse('message.completed', [
+            'routedTo' => $orchestrated['route'],
+            'artifactCount' => count($orchestrated['artifacts']),
+            'actionCount' => 0,
+        ]);
+    }
+
+    private function emitAgentResult(
+        string $companyId,
+        string $userId,
+        string $sessionId,
+        string $content,
+        BrevixAgentRunner $agentRunner,
+        string $reason
+    ): void {
+        $route = 'agent.risk_review';
+        $toolName = 'agent.risk_review';
+
+        $this->emitSse('route.selected', ['route' => $route, 'reason' => $reason]);
+        $this->emitSse('tool.started', ['toolName' => $toolName]);
+
+        try {
+            $agentResult = $agentRunner->run([
+                'company_id' => $companyId,
+                'user_id' => $userId,
+                'conversation_id' => $sessionId,
+                'message' => $content,
+                'requested_action' => 'risk_review',
+                'max_response_size' => BrevixAgentRunner::DEFAULT_MAX_RESPONSE_SIZE,
+                'page_context' => (object) [],
+            ]);
+
+            $artifact = $this->agentArtifact($agentResult);
+            $this->emitSse('artifact.upsert', $artifact);
+            $this->emitSse('tool.completed', [
+                'toolName' => $toolName,
+                'success' => true,
+                'rowCount' => count($agentResult['findings'] ?? []),
+            ]);
+
+            $message = (string) ($agentResult['message'] ?? '');
+            $this->emitSse('message.delta', ['content' => $message]);
+
+            $actions = is_array($agentResult['recommended_actions'] ?? null) ? $agentResult['recommended_actions'] : [];
+            $structuredPayload = [
+                'routedTo' => $route,
+                'agentRunId' => $agentResult['trace_id'] ?? null,
+                'intent' => $agentResult['intent'] ?? null,
+                'artifacts' => [$artifact],
+                'actions' => $actions,
+                'requiresReview' => (bool) ($agentResult['requires_review'] ?? false),
+            ];
+            $this->chatService->logAssistantMessage($companyId, $sessionId, $message, $structuredPayload);
+
+            $this->emitSse('message.completed', [
+                'routedTo' => $route,
+                'artifactCount' => 1,
+                'actionCount' => count($actions),
+                'traceId' => $agentResult['trace_id'] ?? null,
+            ]);
+        } catch (Throwable $e) {
+            $traceId = $e instanceof BrevixAgentRunFailed ? $e->agentRunId() : null;
+            $message = $this->agentUnavailableMessage();
+
+            $this->emitSse('tool.completed', [
+                'toolName' => $toolName,
+                'success' => false,
+                'rowCount' => 0,
+                'traceId' => $traceId,
+            ]);
+            $this->emitSse('message.delta', ['content' => $message]);
+
+            $this->chatService->logAssistantMessage($companyId, $sessionId, $message, [
+                'routedTo' => $route,
+                'intent' => 'agent_service_unavailable',
+                'agentRunId' => $traceId,
+                'artifacts' => [],
+                'actions' => [],
+                'requiresReview' => false,
+            ]);
+
+            $this->emitSse('message.completed', [
+                'routedTo' => $route,
+                'artifactCount' => 0,
+                'actionCount' => 0,
+                'traceId' => $traceId,
+                'error' => 'agent_service_unavailable',
+            ]);
+        }
+    }
+
+    /** @param array<string, mixed> $agentResult */
+    private function agentArtifact(array $agentResult): array
+    {
+        $traceId = (string) ($agentResult['trace_id'] ?? uniqid('agent-run-'));
+
+        return [
+            'id' => 'agent-findings-'.$traceId,
+            'type' => 'agent_findings',
+            'title' => 'Risk Review Findings',
+            'data' => [
+                'intent' => $agentResult['intent'] ?? 'unknown',
+                'findings' => $agentResult['findings'] ?? [],
+                'recommendedActions' => $agentResult['recommended_actions'] ?? [],
+                'requiresReview' => (bool) ($agentResult['requires_review'] ?? false),
+                'traceId' => $traceId,
+            ],
+            'sourceRefs' => [],
+        ];
+    }
+
+    /** @param array<int, mixed> $messages */
+    private function messagesForLlm(array $messages): array
+    {
+        return array_map(function ($msg): array {
+            return [
+                'role' => in_array($msg['role'] ?? 'user', ['system', 'user', 'assistant'], true) ? $msg['role'] : 'user',
+                'content' => (string) ($msg['content'] ?? ''),
+            ];
+        }, array_slice($messages, -20));
+    }
+
+    private function rexSystemPrompt(): string
+    {
+        return 'You are Rex, an expert AI financial auditor built into Brevix AI. Be confident, direct, concise, and careful with facts. Do not invent company-specific balances, vendors, transactions, alerts, or fraud findings. If the user needs company-data analysis and no data was provided, say what Rex needs to check next. Keep responses under 200 words unless a detailed explanation is needed.';
+    }
+
+    private function agentUnavailableMessage(): string
+    {
+        return 'I could not complete the risk review right now. No alerts or cases were created. Please try again or review the dashboard manually.';
+    }
+
+    private function emitSse(string $type, array $payload): void
+    {
+        echo 'data: '.json_encode(['type' => $type, 'payload' => $payload])."\n\n";
+
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+    }
+
     /**
      * GET /api/chat/sessions/{sessionId}/workspace
      */
     public function workspace(Request $request, string $sessionId): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $workspace = $this->chatService->getWorkspace($companyId, $sessionId);
+
         return response()->json($workspace);
     }
 
@@ -217,10 +373,13 @@ class ChatController extends Controller
     {
         $companyId = $request->user()->company_id;
         $userId = $request->user()->id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->chatService->confirmAction($companyId, $userId, $sessionId, $actionId);
+
             return response()->json($result);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -234,10 +393,13 @@ class ChatController extends Controller
     {
         $companyId = $request->user()->company_id;
         $userId = $request->user()->id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->chatService->rejectAction($companyId, $userId, $sessionId, $actionId);
+
             return response()->json($result);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -250,9 +412,12 @@ class ChatController extends Controller
     public function usage(Request $request): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $usage = $this->chatService->getUsage($companyId);
+
         return response()->json($usage);
     }
 }
