@@ -7,6 +7,7 @@ use App\Services\UploadService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class UploadController extends Controller
 {
@@ -23,9 +24,12 @@ class UploadController extends Controller
     public function index(Request $request): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $data = $this->uploadService->list($companyId);
+
         return response()->json($data);
     }
 
@@ -35,10 +39,14 @@ class UploadController extends Controller
     public function show(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $detail = $this->uploadService->getDetail($companyId, $id);
-        if (!$detail) return response()->json(['error' => 'Upload not found'], 404);
+        if (! $detail) {
+            return response()->json(['error' => 'Upload not found'], 404);
+        }
 
         return response()->json($detail);
     }
@@ -49,17 +57,20 @@ class UploadController extends Controller
     public function store(Request $request): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         $request->validate([
-            'importType' => 'required|string',
+            'importType' => ['required', 'string', Rule::in(UploadService::SUPPORTED_IMPORT_TYPES)],
             'originalFilename' => 'required|string|min:1',
             'claimedContentType' => 'nullable|string',
-            'fileSizeBytes' => 'nullable|integer|positive',
+            'fileSizeBytes' => 'nullable|integer|min:1',
         ]);
 
         try {
             $result = $this->uploadService->createSession($companyId, $request->user()->id, $request->all());
+
             return response()->json($result, 201);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -72,10 +83,13 @@ class UploadController extends Controller
     public function complete(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->uploadService->completeDirectUpload($companyId, $request->user()->id, $id);
+
             return response()->json($result, 202);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -88,10 +102,13 @@ class UploadController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $this->uploadService->delete($companyId, $request->user()->id, $id);
+
             return response()->json(['success' => true]);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -104,10 +121,13 @@ class UploadController extends Controller
     public function preview(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->uploadService->getPreview($companyId, $id);
+
             return response()->json($result);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -120,10 +140,13 @@ class UploadController extends Controller
     public function mappings(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->uploadService->saveMapping($companyId, $request->user()->id, $id, $request->all());
+
             return response()->json($result);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -136,10 +159,13 @@ class UploadController extends Controller
     public function validateUpload(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->uploadService->queueValidation($companyId, $request->user()->id, $id);
+
             return response()->json($result, 202);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -152,10 +178,13 @@ class UploadController extends Controller
     public function promote(Request $request, string $id): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
 
         try {
             $result = $this->uploadService->queuePromotion($companyId, $request->user()->id, $id);
+
             return response()->json($result, 202);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);

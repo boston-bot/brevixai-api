@@ -9,14 +9,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Upload extends Model
 {
     protected $keyType = 'string';
+
     public $incrementing = false;
+
     public $timestamps = false;
 
     protected $fillable = [
-        'company_id', 'uploaded_by', 'filename', 'file_size', 'status',
+        'id', 'company_id', 'uploaded_by', 'filename', 'file_size', 'status',
         'sheets_parsed', 'row_count', 'import_type', 'original_filename',
         'storage_filename', 'claimed_content_type', 'file_extension',
-        'file_size_bytes', 'sha256',
+        'file_size_bytes', 'sha256', 'quarantine_bucket', 'quarantine_key',
+        'detected_content_type', 'status_detail', 'failure_code', 'scan_status',
+        'scan_result', 'inspection_summary', 'latest_mapping_version_id',
+        'latest_validation_run_id', 'uploaded_at', 'scanned_at', 'inspected_at',
+        'validated_at', 'promoted_at',
     ];
 
     protected $casts = [
