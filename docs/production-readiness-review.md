@@ -10,54 +10,42 @@ Scope:
 
 ## Claude Handoff Snapshot
 
-Last updated: 2026-05-23
+Last updated: 2026-05-23 (second session)
 
 Current state:
 
-- `brevixai-api` is on `ready-review`, tracking `origin/ready-review`; latest commit at handoff time is `ea059fd`.
-- `brevixai-api` has uncommitted Codex changes from this review pass. Do not assume the working tree is clean.
-- `brevixai` was clean on `main` at `3825fca` when last checked.
-- `brevixai-agents` was clean on `update-git-actions` at `8eaa984` when last checked.
+- `brevixai-api` is on `ready-review`; working tree has uncommitted Wave 1 changes from this session (PRR-007, tracker update, .env fix). Commit before next handoff.
+- `brevixai` is on `main`; working tree has uncommitted Wave 1 changes from this session (PRR-001 venv untrack, PRR-005 landing redirect, PRR-006 CI gates, PRR-008 Playwright fix, e2e landing test fix). Commit before next handoff.
+- `brevixai-agents` is on `update-git-actions`; working tree has uncommitted PRR-013 comment. Commit before next handoff.
 
-Uncommitted API files at handoff:
+Confirmed decisions this session:
 
-- `.env.example`
-- `app/Http/Controllers/Api/AuthController.php`
-- `app/Support/CorsAllowedOrigins.php`
-- `config/cors.php`
-- `docs/production-readiness-review.md`
-- `tests/Feature/AuthOnboardingTest.php`
-- `tests/Unit/CorsAllowedOriginsTest.php`
+- **Rex runtime**: Laravel → brevixai-agents is the production path. Node/TypeScript docs superseded. PRR-002 closed.
+- **Production CORS**: Already set in production environment. PRR-009 verification deferred.
 
-Completed before this handoff:
+Completed this session (Wave 1):
 
-- PRR-011 upload workflow tenancy and session persistence were fixed and committed by the user before this snapshot.
-- PRR-009 API CORS hardening is implemented but not committed. Production CORS now fails closed unless `APP_FRONTEND_URL` or `CORS_ALLOWED_ORIGINS` is set; local/development/testing keep Expo localhost origins.
-- PRR-012 signup exception leakage is implemented but not committed. Signup failures now report server-side and return a generic client error without `details`.
-- The tracker has the current findings, verification log, and open questions.
-
-Verification completed:
-
-- `php artisan test tests/Unit/CorsAllowedOriginsTest.php` passed.
-- `php artisan test tests/Feature/AuthOnboardingTest.php` passed.
-- Full `php artisan test` passed after the latest API changes: 241 tests, 1227 assertions.
-- Earlier verification also passed for frontend typecheck, agent pytest, and agent quality gate; frontend Jest and Playwright still have known failures tracked as PRR-005 and PRR-008.
+- PRR-007 resolved: `investigative_synthesis` now passes through `BrevixAgentRunner` and `AgentChatController::responseContract()`; two new contract tests added; 243 API tests pass.
+- PRR-002 resolved by decision: Node/TypeScript Rex architecture doc marked superseded.
+- PRR-005 resolved: `app/index.tsx` now redirects authenticated users to `/(dashboard)` matching the dashboard layout guard pattern; 108 frontend Jest tests pass.
+- PRR-008 resolved: Playwright webServer updated to export + serve approach; `serve` added as devDep; e2e login button selector fixed ("Log In" not "Login" role link); all 3 Playwright tests pass.
+- PRR-006 resolved: Frontend CI now gates on Jest (`npm test -- --runInBand --ci`) and Playwright (`npm run test:e2e -- --project=chromium`) in addition to typecheck.
+- PRR-001 resolved: `orchestrator/venv/` added to `.gitignore`; 3,669 tracked files removed from git index (`git rm -r --cached`). History rewrite (BFG) not performed — confirm with team whether it is needed.
+- PRR-013 resolved: Benchmark vendor seed loop in `brevixai-agents/app/graph.py` annotated with clarifying comment.
+- `.env` corrupted line fixed: `PERSONAL_FINANCE_PDFTOTEXT_PATH` had `php artisan serve` appended; restored to `/usr/local/bin/pdftotext`.
 
 Recommended next steps:
 
-1. Commit the current `brevixai-api` CORS/auth/tracker changes after reviewing the diff.
-2. Ask the user for exact AWS production frontend origin(s), then verify production `APP_FRONTEND_URL`/`CORS_ALLOWED_ORIGINS` are set.
-3. Resolve PRR-002 before major Rex work: decide whether production Rex is Laravel-to-agent-service, Node/TypeScript orchestration, or a transition state.
-4. Fix PRR-007 if Laravel-to-agent-service is the path: pass `investigative_synthesis` through `AgentChatController` and add a contract test.
-5. Clean PRR-001 in the frontend repo: remove tracked `orchestrator/venv` from git safely and add ignore coverage.
-6. Fix PRR-005 and PRR-008 so frontend Jest and Playwright can become release gates.
+1. Commit all three repos with the Wave 1 changes above.
+2. Start Wave 3 tracks: Data ingestion, Fraud/risk/cases, Observability, Product value, Test/release gates.
+3. Decide whether BFG history rewrite is needed to reduce repo size after PRR-001 untracking.
+4. Answer open question: What is the production URL for brevixai-agents health check?
 
-Open user questions to ask explicitly:
+Open user questions:
 
-- What are the exact production frontend origin(s) on AWS?
-- What AWS services are hosting each surface: frontend, Laravel API, and agent service?
-- Which Rex runtime is intended for production now?
-- What first-use customer workflow should be most valuable: QuickBooks connection, upload ingestion, Rex investigation, or fraud/case workflow?
+- Should `orchestrator/venv` history be rewritten (BFG, force-push, all collaborators re-clone) or just leave it untracked going forward?
+- What is the target production URL for brevixai-agents health check?
+- What first-use customer workflow is the highest-value demo scenario?
 
 ## Operating Rules
 
@@ -115,18 +103,21 @@ Open user questions to ask explicitly:
 
 | ID | Severity | Area | Status | Finding | Evidence | Next step |
 | --- | --- | --- | --- | --- | --- | --- |
-| PRR-001 | High | Frontend repo hygiene | Open | The frontend repo tracks a generated Python virtual environment under `orchestrator/venv`. | `git ls-files orchestrator/venv` returns thousands of files. | Plan safe removal from git and add ignore coverage. |
-| PRR-002 | High | Rex architecture | Open | Existing docs conflict on runtime ownership: frontend docs say Node/TypeScript-first, while API work includes Laravel Rex chat routing and a Python agent runner. | `docs/superpowers/specs/2026-05-14-rex-chat-and-agent-architecture-review.md`, `brevixai-api/app/Services/Agents/BrevixAgentRunner.php`. | Decide current production control plane before hardening. |
+| PRR-001 | High | Frontend repo hygiene | Resolved | The frontend repo tracked a generated Python virtual environment under `orchestrator/venv` (3,669 files). | `git ls-files orchestrator/venv` returned thousands of files. | Added `orchestrator/venv/` to `.gitignore`; ran `git rm -r --cached orchestrator/venv`. History rewrite (BFG) deferred — confirm with team. |
+| PRR-002 | High | Rex architecture | Resolved by decision | Existing docs conflicted on runtime ownership. | `docs/superpowers/specs/2026-05-14-rex-chat-and-agent-architecture-review.md` — Node/TypeScript-first decision; `brevixai-api/app/Services/Agents/BrevixAgentRunner.php` — Laravel→agent service implementation. | **Decision: Laravel → brevixai-agents is production.** Node/TypeScript doc marked superseded (2026-05-23). |
 | PRR-003 | Medium | Documentation | Open | API README is still mostly the Laravel skeleton and frontend has no README. | `brevixai-api/README.md`, missing `brevixai/README.md`. | Add product-specific setup/deploy/support docs. |
 | PRR-004 | Medium | AI config | Open | API `.env.example` uses `LLM_MODEL=chat-latest`; model compatibility should be verified against current OpenAI production usage. | `brevixai-api/.env.example`. | Confirm deployed model and update docs/config if needed. |
-| PRR-005 | Medium | Frontend tests | Open | Frontend Jest currently fails one landing-page redirect expectation. | `npm test -- --runInBand` in `brevixai`: 1 failed, 107 passed. | Update the stale test or restore the intended redirect behavior after confirming product intent. |
-| PRR-006 | Medium | Frontend CI | Open | Frontend CI runs typecheck only; Jest and Playwright are not release gates. | `brevixai/.github/workflows/ci.yml`. | Add unit/e2e gates once current Jest failure is resolved. |
-| PRR-007 | Medium | Rex contract | Open | Frontend can render `investigative_synthesis`, but Laravel `AgentChatController` drops that field from the agent-service response. | `brevixai/src/components/dashboard/rex/RexWorkspace.tsx`, `brevixai-api/app/Http/Controllers/Chat/AgentChatController.php`. | Include synthesis in the API contract and add a contract test. |
-| PRR-008 | Medium | Frontend e2e | Open | Playwright cannot start the configured Expo web server because the config uses `npx expo start --web --port 8081`, but Expo 55 reports `--port` does not apply to web and prompts in non-interactive mode. | `brevixai/playwright.config.ts`, `npx expo start --help`, `npm run test:e2e -- --project=chromium --reporter=list`. | Update e2e webServer startup to a deterministic web port and add CI gate. |
-| PRR-009 | Medium | API CORS | Resolved in code | API CORS config always included localhost origins, including production, and did not fail closed when `APP_FRONTEND_URL`/`CORS_ALLOWED_ORIGINS` were missing. | `brevixai-api/config/cors.php`. | `CorsAllowedOrigins` now fails closed in production and keeps localhost defaults only for local/development/testing; verify exact AWS frontend origins are set in production env. |
+| PRR-005 | Medium | Frontend tests | Resolved | Frontend Jest failed one landing-page redirect expectation because `app/index.tsx` had no auth redirect at all. | `npm test -- --runInBand` in `brevixai`: 1 failed, 107 passed. | Added `useAuth` + `useRouter` redirect to `app/index.tsx`; 108/108 Jest tests pass. |
+| PRR-006 | Medium | Frontend CI | Resolved | Frontend CI ran typecheck only; Jest and Playwright were not release gates. | `brevixai/.github/workflows/ci.yml`. | Added Jest (`npm test -- --runInBand --ci`) and Playwright (`npm run test:e2e -- --project=chromium`) steps to CI workflow. |
+| PRR-007 | Medium | Rex contract | Resolved | `AgentChatController::responseContract()` dropped `investigative_synthesis`; `BrevixAgentRunner::run()` also omitted it. Frontend `RexWorkspace` expected the field. | `brevixai-api/app/Http/Controllers/Chat/AgentChatController.php`, `app/Services/Agents/BrevixAgentRunner.php`. | Added `investigative_synthesis` to both `responseContract()` and the runner return array; 2 new contract tests; 243 API tests pass. |
+| PRR-008 | Medium | Frontend e2e | Resolved | Playwright could not start the Expo web server (`--port` flag ignored by Expo 55 web, prompt in non-interactive mode). E2e login test also used wrong selector ("Login" role link instead of "Log In" text). | `brevixai/playwright.config.ts`, `brevixai/e2e/landing.test.ts`. | Updated webServer to `npx expo export ... && npx serve dist -p 8081 -s`; added `serve` devDep; fixed login button selector; all 3 Playwright tests pass. |
+| PRR-009 | Medium | API CORS | Resolved | API CORS config always included localhost origins in production and did not fail closed when env vars were missing. | `brevixai-api/config/cors.php`. | `CorsAllowedOrigins` now fails closed in production; localhost defaults kept for local/development/testing. Production origins confirmed set in prod env. |
 | PRR-010 | Low | Frontend env hygiene | Open | Frontend Expo export loads local `.env` containing backend/LLM/QBO variable names. Expo should only expose `EXPO_PUBLIC_*`, but frontend env files should still be separated from backend secrets to reduce deployment mistakes. | `npx expo export --platform web`, `brevixai/.env.example`. | Split frontend public env from server/private env docs. |
 | PRR-011 | High | Upload tenancy | Resolved | Upload workflow endpoints could look up uploads by ID without company scope; upload creation also relied on a database-generated UUID that Eloquent did not own, and `positive` validation caused a 500 for `fileSizeBytes`. | `app/Services/UploadService.php`, `app/Models/Upload.php`, `app/Http/Controllers/Api/UploadController.php`. | Fixed and covered by `UploadWorkflowSecurityTest`. |
 | PRR-012 | Medium | Auth error handling | Resolved | Signup failures returned raw exception details to the client. | `app/Http/Controllers/Api/AuthController.php`. | Fixed with a generic error response, server-side reporting, and `AuthOnboardingTest` coverage; continue auditing broad catch blocks in API controllers. |
+| PRR-013 | Low | Agent graph vendor seeds | Resolved | Benchmark fixture vendor names were hard-coded in `fraud_analyzer` without explanation — could be mistaken for production logic. | `brevixai-agents/app/graph.py` lines 210–221. | Added inline comment clarifying these names exist for benchmark dataset detection only. |
+| PRR-014 | Low | Agent optional tool alerting | Open | Four optional tool calls (vendor_risk, reconciliation_risk, entity_relationship_risk, aggregate_risk_summary) fail silently with `logger.warning()`. No alerting path for systematic failures. | `brevixai-agents/app/graph.py` lines 234–362. | Add `degraded_tools` list to `AgentRunResponse`; set monitoring alert for non-zero tool failure counts. Belongs in Observability track. |
+| PRR-015 | Low | Agent-Laravel tool contract | Open | The agent service assumes all 6 Laravel tool endpoints exist. Missing or renamed endpoints are partially silenced by broad exception handling. | `brevixai-agents/app/tools/laravel.py`, `brevixai-api` internal agent-tools routes. | Document which tools are required vs. optional in both repos. Belongs in Documentation track. |
 
 ## Verification Log
 
@@ -148,6 +139,12 @@ Open user questions to ask explicitly:
 | 2026-05-23 | `php artisan test` | `brevixai-api` | Passed after CORS hardening: 240 tests, 1223 assertions. |
 | 2026-05-23 | `php artisan test tests/Feature/AuthOnboardingTest.php` | `brevixai-api` | Passed: 3 tests, 11 assertions. |
 | 2026-05-23 | `php artisan test` | `brevixai-api` | Passed after auth error hardening: 241 tests, 1227 assertions. |
+| 2026-05-23 | `php artisan test tests/Feature/AgentChatControllerTest.php` | `brevixai-api` | Passed: 8 tests, 46 assertions (including 2 new synthesis contract tests). PRR-007 fixed. |
+| 2026-05-23 | `php artisan test` | `brevixai-api` | Passed after PRR-007 fix: 243 tests, 1233 assertions. |
+| 2026-05-23 | `npm test -- --runInBand` | `brevixai` | Passed: 108 tests, 0 failures. PRR-005 fixed. |
+| 2026-05-23 | `npm run test:e2e -- --project=chromium --reporter=list` | `brevixai` | Passed: 3 tests. PRR-008 fixed (export+serve webServer, login selector corrected). |
+| 2026-05-23 | `git ls-files orchestrator/venv` | `brevixai` | Returns 0 after `git rm -r --cached` and `.gitignore` update. PRR-001 fixed. |
+| 2026-05-23 | `.venv/bin/pytest tests/ --ignore=tests/test_evals.py -q` | `brevixai-agents` | Passed: 397 tests. PRR-013 comment addition caused no regressions. |
 
 ## Source Notes
 

@@ -116,6 +116,7 @@ class BrevixAgentRunner
                 'can_create_alert' => collect($actions)->contains(fn (array $action): bool => ($action['type'] ?? null) === 'create_alert'),
                 'requires_review' => $requiresReview,
                 'trace_id' => $agentRun->id,
+                'investigative_synthesis' => is_array($agentResponse['investigative_synthesis'] ?? null) ? $agentResponse['investigative_synthesis'] : null,
                 'steps' => $steps,
                 'model_provider' => $agentResponse['model_provider'] ?? null,
                 'model_name' => $agentResponse['model_name'] ?? null,

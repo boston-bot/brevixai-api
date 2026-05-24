@@ -61,6 +61,7 @@ class AgentChatController extends Controller
                 'can_create_alert' => false,
                 'requires_review' => false,
                 'trace_id' => $e instanceof BrevixAgentRunFailed ? $e->agentRunId() : null,
+                'investigative_synthesis' => null,
             ], 502);
         }
     }
@@ -76,6 +77,7 @@ class AgentChatController extends Controller
             'can_create_alert' => $result['can_create_alert'],
             'requires_review' => $result['requires_review'],
             'trace_id' => $result['trace_id'],
+            'investigative_synthesis' => $result['investigative_synthesis'] ?? null,
         ];
     }
 }
