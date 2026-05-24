@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\CorsAllowedOrigins;
+
 return [
 
     /*
@@ -19,19 +21,11 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => array_values(array_unique(array_filter(array_map(
-        static fn (string $origin): string => rtrim(trim($origin), '/'),
-        array_merge(
-            [
-                env('APP_FRONTEND_URL', 'http://localhost:8081'),
-                'http://localhost:8081',
-                'http://localhost:19006',
-                'http://127.0.0.1:8081',
-                'http://127.0.0.1:19006',
-            ],
-            explode(',', env('CORS_ALLOWED_ORIGINS', ''))
-        )
-    )))),
+    'allowed_origins' => CorsAllowedOrigins::fromEnvironment(
+        env('APP_ENV', 'production'),
+        env('APP_FRONTEND_URL'),
+        env('CORS_ALLOWED_ORIGINS')
+    ),
 
     'allowed_origins_patterns' => [],
 
