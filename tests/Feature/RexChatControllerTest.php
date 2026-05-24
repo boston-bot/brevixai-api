@@ -157,7 +157,7 @@ class RexChatControllerTest extends TestCase
         });
     }
 
-    public function test_rex_session_chat_uses_llm_router_to_start_agent_run(): void
+    public function test_rex_session_chat_uses_deterministic_router_to_start_agent_run(): void
     {
         [$company, $user] = $this->createCompanyUser();
         Sanctum::actingAs($user);
@@ -230,10 +230,7 @@ class RexChatControllerTest extends TestCase
         $this->assertStringContainsString('"type":"artifact.upsert"', $stream);
         $this->assertStringContainsString('One pattern may be worth reviewing.', $stream);
 
-        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/chat/completions'
-            && $request->hasHeader('Authorization', 'Bearer test-openai-key')
-            && $request['model'] === 'router-test-model'
-            && ($request['response_format']['type'] ?? null) === 'json_object');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/chat/completions');
 
         Http::assertSent(fn ($request): bool => $request->url() === 'http://agent.test/agent/run'
             && $request->hasHeader('Authorization', 'Bearer test-agent-key')

@@ -261,6 +261,55 @@ class AgentToolController extends Controller
         }
     }
 
+    public function transactions(Request $request, string $companyId): JsonResponse
+    {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        $transactionFilterError = $this->transactionFilterValidationError($request);
+        if ($transactionFilterError) {
+            return $transactionFilterError;
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            return response()->json($this->transactionSummary($request, $companyId));
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'transaction_lookup', $e);
+        }
+    }
+
+    public function dashboard(Request $request, string $companyId): JsonResponse
+    {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            return response()->json($this->dashboardSummary($companyId));
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'dashboard_health', $e);
+        }
+    }
+
     private function shouldIncludeTransactions(Request $request): bool
     {
         return filter_var($request->query('include_transactions', false), FILTER_VALIDATE_BOOLEAN);

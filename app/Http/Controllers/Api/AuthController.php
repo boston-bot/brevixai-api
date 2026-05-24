@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Company;
+use App\Models\PasswordReset;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -152,6 +153,68 @@ class AuthController extends Controller
             'createdAt' => $user->created_at,
             'hasCompletedOnboarding' => (bool) ($company?->has_completed_onboarding ?? false),
         ]);
+    }
+
+    /**
+     * POST /api/auth/forgot-password
+     * Always returns a generic success response to prevent account enumeration.
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $user = User::where('email', strtolower($request->input('email')))->first();
+
+        if ($user) {
+            PasswordReset::where('user_id', $user->id)->delete();
+
+            $rawToken = Str::random(64);
+
+            PasswordReset::create([
+                'user_id' => $user->id,
+                'token' => hash('sha256', $rawToken),
+                'expires_at' => now()->addHour(),
+                'used' => false,
+            ]);
+        }
+
+        return response()->json(['message' => 'If an account with that email exists, a password reset link has been sent.']);
+    }
+
+    /**
+     * POST /api/auth/reset-password
+     */
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'token' => 'required|string',
+            'password' => 'required|min:8',
+        ]);
+
+        $record = PasswordReset::where('token', hash('sha256', $request->input('token')))
+            ->where('used', false)
+            ->where('expires_at', '>', now())
+            ->first();
+
+        if (! $record) {
+            return response()->json(['error' => 'Invalid or expired password reset token.'], 422);
+        }
+
+        $user = $record->user;
+
+        if (! $user) {
+            return response()->json(['error' => 'Invalid or expired password reset token.'], 422);
+        }
+
+        DB::transaction(function () use ($user, $record, $request): void {
+            $user->update(['password_hash' => Hash::make($request->input('password'))]);
+            $record->update(['used' => true]);
+            $user->tokens()->delete();
+        });
+
+        return response()->json(['message' => 'Password has been reset successfully.']);
     }
 
     /**
