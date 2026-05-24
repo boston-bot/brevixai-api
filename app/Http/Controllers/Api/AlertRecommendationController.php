@@ -6,6 +6,7 @@ use App\Exceptions\AlertRecommendationReviewConflict;
 use App\Http\Controllers\Controller;
 use App\Models\AlertRecommendation;
 use App\Models\RecommendationReviewEvent;
+use App\Services\Agents\AlertRecommendationService;
 use App\Services\AlertRecommendationReviewService;
 use App\Services\RecommendationReviewAuditService;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,7 @@ class AlertRecommendationController extends Controller
     public function __construct(
         private readonly AlertRecommendationReviewService $reviewService,
         private readonly RecommendationReviewAuditService $reviewAuditService,
+        private readonly AlertRecommendationService $alertRecommendationService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -171,6 +173,30 @@ class AlertRecommendationController extends Controller
         }
 
         return response()->json(['recommendation' => $recommendation]);
+    }
+
+    public function run(Request $request): JsonResponse
+    {
+        $companyId = $request->user()->company_id;
+        if (! $companyId) {
+            return response()->json(['error' => 'No company associated with account'], 403);
+        }
+
+        try {
+            $result = $this->alertRecommendationService->getAlertRecommendations($companyId);
+        } catch (Throwable $e) {
+            return $this->safeReviewError($e, 'alert_recommendation_run');
+        }
+
+        $recommendations = $result['recommended_alerts'] ?? [];
+
+        return response()->json([
+            'recommendations_generated' => count($recommendations),
+            'pending_review' => collect($recommendations)
+                ->where('status', AlertRecommendation::STATUS_PENDING_REVIEW)
+                ->count(),
+            'recommendations' => $recommendations,
+        ]);
     }
 
     private function reviewConflict(AlertRecommendationReviewConflict $e): JsonResponse
