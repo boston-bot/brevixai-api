@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Throwable;
 
 class AuthController extends Controller
 {
@@ -76,9 +77,14 @@ class AuthController extends Controller
                     'role' => $user->role,
                 ],
             ], 201);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['error' => 'Internal server error', 'details' => $e->getMessage()], 500);
+        } catch (Throwable $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+
+            report($e);
+
+            return response()->json(['error' => 'Unable to create account. Please try again later.'], 500);
         }
     }
 
@@ -94,7 +100,7 @@ class AuthController extends Controller
 
         $user = User::where('email', strtolower($request->input('email')))->first();
 
-        if (!$user || !Hash::check($request->input('password'), $user->password_hash)) {
+        if (! $user || ! Hash::check($request->input('password'), $user->password_hash)) {
             return response()->json(['error' => 'Invalid email or password'], 401);
         }
 
@@ -123,6 +129,7 @@ class AuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
+
         return response()->json(['message' => 'Logged out']);
     }
 
@@ -154,7 +161,7 @@ class AuthController extends Controller
     {
         $company = $request->user()->company;
 
-        if (!$company) {
+        if (! $company) {
             return response()->json(['error' => 'User is not associated with a company'], 422);
         }
 

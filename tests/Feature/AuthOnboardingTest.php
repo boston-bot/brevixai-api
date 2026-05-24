@@ -17,6 +17,7 @@ class AuthOnboardingTest extends TestCase
     {
         parent::setUp();
 
+        Schema::dropIfExists('subscriptions');
         Schema::dropIfExists('users');
         Schema::dropIfExists('companies');
 
@@ -67,6 +68,19 @@ class AuthOnboardingTest extends TestCase
         $this->assertFalse(Schema::hasColumn('users', 'has_completed_onboarding'));
     }
 
+    public function test_signup_failure_returns_safe_error_without_exception_details(): void
+    {
+        $this->postJson('/api/auth/signup', [
+            'email' => 'owner@example.com',
+            'password' => 'password123',
+            'companyName' => 'Brevix Test Co',
+        ])
+            ->assertStatus(500)
+            ->assertJson(['error' => 'Unable to create account. Please try again later.'])
+            ->assertJsonMissingPath('details')
+            ->assertJsonMissingPath('exception');
+    }
+
     /**
      * @return array{0: Company, 1: User}
      */
@@ -81,7 +95,7 @@ class AuthOnboardingTest extends TestCase
 
         $user = new User([
             'company_id' => $company->id,
-            'email' => Str::uuid() . '@example.com',
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
             'first_name' => 'Test',
             'last_name' => 'User',
