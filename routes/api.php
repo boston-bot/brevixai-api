@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\Api\AccountingController;
 use App\Http\Controllers\Api\AgentApprovalController;
 use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\EntityGraphController;
@@ -63,6 +62,9 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/case-recommendations', [AgentToolController::class, 'caseRecommendations']);
         Route::get('/company/{companyId}/transactions', [AgentToolController::class, 'transactions']);
         Route::get('/company/{companyId}/dashboard', [AgentToolController::class, 'dashboard']);
+        Route::get('/process-registry', [AgentToolController::class, 'processRegistry']);
+        Route::get('/company/{companyId}/pending-recommendations', [AgentToolController::class, 'pendingRecommendations']);
+        Route::get('/company/{companyId}/transaction-detail', [AgentToolController::class, 'transactionDetail']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
@@ -119,11 +121,6 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/summary', [AnalyticsController::class, 'summary']);
         Route::get('/vendors', [AnalyticsController::class, 'vendors']);
         Route::get('/cash-flow', [AnalyticsController::class, 'cashFlow']);
-    });
-
-    // Accounting
-    Route::prefix('accounting')->group(function () {
-        Route::get('/tax-estimate', [AccountingController::class, 'taxEstimate']);
     });
 
     // Dashboard

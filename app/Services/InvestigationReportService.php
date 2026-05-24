@@ -4,13 +4,14 @@ namespace App\Services;
 
 use App\Models\InvestigationActivityEvent;
 use App\Models\InvestigationReportExport;
+use App\Support\ProfessionalServicesDisclaimer;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\CarbonInterface;
 use Exception;
 
 class InvestigationReportService
 {
-    private const DISCLAIMER = 'This report summarizes risk indicators and review activity. It is not a legal conclusion or proof of fraud.';
+    private const DISCLAIMER = ProfessionalServicesDisclaimer::TEXT;
 
     private const SENSITIVE_METADATA_KEYS = [
         'evidence',

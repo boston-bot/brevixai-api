@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\RexProcess;
 use App\Exceptions\BrevixAgentRunFailed;
 use App\Http\Controllers\Controller;
 use App\Services\Agents\BrevixAgentRunner;
@@ -157,7 +158,15 @@ class ChatController extends Controller
                 }
 
                 if ($routeDecision['mode'] === 'agent') {
-                    $this->emitAgentResult($companyId, $userId, $sessionId, $content, $agentRunner, $routeDecision['reason']);
+                    $this->emitAgentResult(
+                        $companyId,
+                        $userId,
+                        $sessionId,
+                        $content,
+                        $agentRunner,
+                        $routeDecision['reason'],
+                        (string) ($routeDecision['requested_action'] ?? RexProcess::RiskReview->value),
+                    );
 
                     return;
                 }
@@ -222,10 +231,12 @@ class ChatController extends Controller
         string $sessionId,
         string $content,
         BrevixAgentRunner $agentRunner,
-        string $reason
+        string $reason,
+        string $requestedAction = 'risk_review',
     ): void {
-        $route = 'agent.risk_review';
-        $toolName = 'agent.risk_review';
+        $requestedAction = RexProcess::resolveOrDefault($requestedAction)->value;
+        $route = 'agent.'.$requestedAction;
+        $toolName = 'agent.'.$requestedAction;
 
         $this->emitSse('route.selected', ['route' => $route, 'reason' => $reason]);
         $this->emitSse('tool.started', ['toolName' => $toolName]);
@@ -236,7 +247,7 @@ class ChatController extends Controller
                 'user_id' => $userId,
                 'conversation_id' => $sessionId,
                 'message' => $content,
-                'requested_action' => 'risk_review',
+                'requested_action' => $requestedAction,
                 'max_response_size' => BrevixAgentRunner::DEFAULT_MAX_RESPONSE_SIZE,
                 'page_context' => (object) [],
             ]);
@@ -260,6 +271,7 @@ class ChatController extends Controller
                 'artifacts' => [$artifact],
                 'actions' => $actions,
                 'requiresReview' => (bool) ($agentResult['requires_review'] ?? false),
+                'degradedTools' => $agentResult['degraded_tools'] ?? [],
             ];
             $this->chatService->logAssistantMessage($companyId, $sessionId, $message, $structuredPayload);
 
@@ -268,6 +280,7 @@ class ChatController extends Controller
                 'artifactCount' => 1,
                 'actionCount' => count($actions),
                 'traceId' => $agentResult['trace_id'] ?? null,
+                'degradedToolCount' => count($agentResult['degraded_tools'] ?? []),
             ]);
         } catch (Throwable $e) {
             $traceId = $e instanceof BrevixAgentRunFailed ? $e->agentRunId() : null;
@@ -314,6 +327,7 @@ class ChatController extends Controller
                 'findings' => $agentResult['findings'] ?? [],
                 'recommendedActions' => $agentResult['recommended_actions'] ?? [],
                 'requiresReview' => (bool) ($agentResult['requires_review'] ?? false),
+                'degradedTools' => $agentResult['degraded_tools'] ?? [],
                 'traceId' => $traceId,
             ],
             'sourceRefs' => [],
@@ -333,7 +347,7 @@ class ChatController extends Controller
 
     private function rexSystemPrompt(): string
     {
-        return 'You are Rex, an expert AI financial auditor built into Brevix AI. Be confident, direct, concise, and careful with facts. Do not invent company-specific balances, vendors, transactions, alerts, or fraud findings. If the user needs company-data analysis and no data was provided, say what Rex needs to check next. Keep responses under 200 words unless a detailed explanation is needed.';
+        return 'You are Rex, Brevix AI\'s financial intelligence orchestration layer. Answer only product, data-source, and risk-workflow questions in direct mode. Route company-data questions to deterministic Brevix services instead of inventing balances, vendors, transactions, alerts, or fraud findings. Do not provide legal, tax, accounting, audit-opinion, CPA, investment, law-enforcement, or attorney-client services. Do not conclude fraud occurred or present outputs as a professional opinion. If a request needs company data, explain which data source or workflow Rex needs next. Keep responses under 200 words unless a detailed explanation is needed.';
     }
 
     private function agentUnavailableMessage(): string

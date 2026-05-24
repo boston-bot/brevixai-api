@@ -41,8 +41,8 @@ class AuthController extends Controller
 
             // 2. Setup Subscription
             $tier = $request->input('tier') ?? 'starter';
-            if ($tier === 'accounting-firm') {
-                $tier = 'accounting';
+            if ($tier === 'accounting' || $tier === 'accounting-firm') {
+                $tier = 'risk-advisory';
             }
 
             Subscription::create([

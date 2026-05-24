@@ -7,6 +7,7 @@ use App\Models\AgentActionApproval;
 use App\Services\Agents\AgentActionExecutorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class AgentApprovalController extends Controller
@@ -36,7 +37,7 @@ class AgentApprovalController extends Controller
         }
 
         try {
-            $this->executor->execute($approval, $request->user());
+            $result = $this->executor->execute($approval, $request->user());
         } catch (\InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (Throwable) {
@@ -45,8 +46,12 @@ class AgentApprovalController extends Controller
 
         return response()->json([
             'approval_id' => $approval->id,
-            'status' => 'approved',
+            'status'      => 'approved',
             'executed_at' => $approval->fresh()->executed_at,
+            'result'      => [
+                'resource_type' => $result->resourceType,
+                'resource_id'   => $result->resourceId,
+            ],
         ]);
     }
 
@@ -73,14 +78,23 @@ class AgentApprovalController extends Controller
         }
 
         $approval->update([
-            'status' => 'rejected',
+            'status'      => 'rejected',
             'rejected_by' => $request->user()->id,
             'rejected_at' => now(),
         ]);
 
+        Log::info('agent.approval.rejected', [
+            'approval_id'      => $approval->id,
+            'agent_run_id'     => $approval->agent_run_id,
+            'company_id'       => $approval->company_id,
+            'rejector_user_id' => $request->user()->id,
+            'action_type'      => $approval->action_type,
+            'execution_status' => 'rejected',
+        ]);
+
         return response()->json([
             'approval_id' => $approval->id,
-            'status' => 'rejected',
+            'status'      => 'rejected',
         ]);
     }
 }

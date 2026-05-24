@@ -179,7 +179,7 @@ POST /api/investigations/{id}/package-manifest
     "linked_recommendations": [],
     "activity_events": [],
     "notes": [],
-    "disclaimer": "This package manifest summarizes included investigation materials and review activity. It is not a legal conclusion or proof of fraud."
+    "disclaimer": "Brevix AI provides informational financial risk indicators and workflow support. It does not provide legal, tax, accounting, audit, CPA, investment, law-enforcement, or attorney-client services, and its outputs are not proof of fraud or a professional opinion."
   }
 }
 ```

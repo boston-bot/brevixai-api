@@ -81,13 +81,21 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             ->assertJsonPath('recommendation.reviewed_by_user_id', $user->id)
             ->assertJsonPath('alert.alert_recommendation_id', $recommendation->id)
             ->assertJsonPath('alert.status', 'open')
-            ->assertJsonPath('alert.rule_key', 'vendor_risk_review');
+            ->assertJsonPath('alert.rule_key', 'vendor_risk_review')
+            ->assertJsonPath('alert.reason_codes.0', 'threshold_splitting')
+            ->assertJsonPath('alert.source_system', 'deterministic_recommendation_engine')
+            ->assertJsonPath('alert.source_recommendation_id', $recommendation->id)
+            ->assertJsonPath('alert.confidence_score', 0.9)
+            ->assertJsonPath('alert.evidence_refs.0', 'recommendation:'.$recommendation->id)
+            ->assertJsonPath('alert.comparison_window.basis', 'current_available_records');
 
         $this->assertDatabaseCount('alerts', 1);
         $this->assertDatabaseHas('alerts', [
             'company_id' => $company->id,
             'alert_recommendation_id' => $recommendation->id,
             'title' => 'Review vendor risk signals',
+            'source_system' => 'deterministic_recommendation_engine',
+            'source_recommendation_id' => $recommendation->id,
         ]);
     }
 
@@ -381,6 +389,12 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             $table->text('title');
             $table->text('detail')->nullable();
             $table->json('evidence')->nullable();
+            $table->json('reason_codes')->nullable();
+            $table->text('source_system')->nullable();
+            $table->uuid('source_recommendation_id')->nullable();
+            $table->decimal('confidence_score', 5, 4)->nullable();
+            $table->json('evidence_refs')->nullable();
+            $table->json('comparison_window')->nullable();
             $table->text('status')->default('open');
             $table->integer('priority_score')->default(50);
             $table->foreignUuid('reviewed_by')->nullable();

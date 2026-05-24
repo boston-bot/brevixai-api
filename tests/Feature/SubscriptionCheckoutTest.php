@@ -87,7 +87,7 @@ class SubscriptionCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_subscription_checkout_normalizes_accounting_firm_tier(): void
+    public function test_subscription_checkout_normalizes_legacy_firm_tier_to_risk_advisory(): void
     {
         [$company, $user] = $this->createCompanyUser();
 
@@ -102,11 +102,11 @@ class SubscriptionCheckoutTest extends TestCase
             ],
         ])
             ->assertOk()
-            ->assertJsonPath('tier', 'accounting');
+            ->assertJsonPath('tier', 'risk-advisory');
 
         $this->assertDatabaseHas('subscriptions', [
             'company_id' => $company->id,
-            'tier' => 'accounting',
+            'tier' => 'risk-advisory',
             'status' => 'active',
         ]);
     }

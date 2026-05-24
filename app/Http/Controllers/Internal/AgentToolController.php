@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Internal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Company;
+use App\Models\Transaction;
 use App\Models\Upload;
 use App\Models\User;
+use App\Services\Agents\AgentActionExecutorService;
 use App\Services\Agents\AgentRiskAnalysisService;
 use App\Services\Agents\AggregateRiskSummaryService;
 use App\Services\Agents\AlertRecommendationService;
@@ -307,6 +309,128 @@ class AgentToolController extends Controller
             return response()->json($this->dashboardSummary($companyId));
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'dashboard_health', $e);
+        }
+    }
+
+    public function processRegistry(Request $request, AgentActionExecutorService $executorService): JsonResponse
+    {
+        try {
+            $executableTypes = $executorService->supportedActionTypes();
+
+            $actionTypes = [
+                ['type' => 'create_alert',    'requires_approval' => true,  'executable' => in_array('create_alert', $executableTypes),    'display_name' => 'Create Alert'],
+                ['type' => 'draft_case',       'requires_approval' => true,  'executable' => in_array('draft_case', $executableTypes),       'display_name' => 'Draft Case'],
+                ['type' => 'send_email',       'requires_approval' => true,  'executable' => in_array('send_email', $executableTypes),       'display_name' => 'Send Email'],
+                ['type' => 'flag_transaction', 'requires_approval' => true,  'executable' => in_array('flag_transaction', $executableTypes), 'display_name' => 'Flag Transaction'],
+                ['type' => 'finalize_case',    'requires_approval' => true,  'executable' => in_array('finalize_case', $executableTypes),    'display_name' => 'Finalize Case'],
+                ['type' => 'update_case',      'requires_approval' => true,  'executable' => in_array('update_case', $executableTypes),      'display_name' => 'Update Case'],
+                ['type' => 'review_dashboard', 'requires_approval' => false, 'executable' => false, 'display_name' => 'Review Dashboard'],
+                ['type' => 'review_findings',  'requires_approval' => false, 'executable' => false, 'display_name' => 'Review Findings'],
+            ];
+
+            return response()->json(['action_types' => $actionTypes]);
+        } catch (Throwable $e) {
+            Log::warning('agent_tool.failed', [
+                'tool_name' => 'process_registry',
+                'tool_endpoint' => $request->method().' '.$request->path(),
+                'agent_request_id' => $request->header('X-Brevix-Agent-Request-Id'),
+                'error_class' => $e::class,
+            ]);
+
+            return response()->json(['error' => 'Agent tool could not complete the request safely'], 500);
+        }
+    }
+
+    public function pendingRecommendations(
+        Request $request,
+        string $companyId,
+        AlertRecommendationService $alertRecommendationService,
+        CaseRecommendationService $caseRecommendationService
+    ): JsonResponse {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            $alertResult = $alertRecommendationService->getAlertRecommendations($companyId);
+            $caseResult = $caseRecommendationService->getCaseRecommendations($companyId);
+
+            return response()->json([
+                'company_id' => $companyId,
+                'alert_recommendations' => $alertResult['recommended_alerts'] ?? [],
+                'case_recommendations' => $caseResult['case_recommendations'] ?? [],
+            ]);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'pending_recommendations', $e);
+        }
+    }
+
+    public function transactionDetail(Request $request, string $companyId): JsonResponse
+    {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        $ids = $request->query('ids');
+        if (! is_array($ids) || count($ids) === 0) {
+            return response()->json(['error' => 'ids must be a non-empty array of transaction UUIDs'], 422);
+        }
+
+        if (count($ids) > 20) {
+            return response()->json(['error' => 'Maximum 20 transaction IDs per request'], 422);
+        }
+
+        foreach ($ids as $id) {
+            if (! is_string($id) || ! Str::isUuid($id)) {
+                return response()->json(['error' => 'Each id must be a valid UUID'], 422);
+            }
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            $transactions = Transaction::where('company_id', $companyId)
+                ->whereIn('id', $ids)
+                ->get()
+                ->map(fn (Transaction $t): array => [
+                    'id' => (string) $t->id,
+                    'date' => $t->date,
+                    'vendor' => $t->vendor_customer,
+                    'amount' => (float) $t->amount,
+                    'type' => $t->type,
+                    'category' => $t->category,
+                    'payment_method' => $t->payment_method,
+                    'anomaly_flag' => (bool) $t->anomaly_flag,
+                    'anomaly_reason' => $t->anomaly_reason,
+                    'memo' => $t->memo,
+                ])
+                ->values()
+                ->all();
+
+            return response()->json([
+                'company_id' => $companyId,
+                'requested_count' => count($ids),
+                'found_count' => count($transactions),
+                'transactions' => $transactions,
+            ]);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'transaction_detail', $e);
         }
     }
 

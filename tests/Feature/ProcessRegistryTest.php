@@ -59,6 +59,28 @@ class ProcessRegistryTest extends TestCase
         $this->assertEmpty($p->approvalTypes());
     }
 
+    public function test_specialized_risk_process_contracts_are_registered(): void
+    {
+        foreach ([
+            RexProcess::ControlsReview,
+            RexProcess::ReconciliationReview,
+            RexProcess::EntityGraphReview,
+            RexProcess::CaseManagement,
+        ] as $process) {
+            $this->assertSame('orchestrator', $process->mode());
+            $this->assertSame(ProcessReadiness::Available, $process->readiness());
+            $this->assertEmpty($process->tools());
+            $this->assertEmpty($process->approvalTypes());
+        }
+    }
+
+    public function test_reporting_process_is_preview_orchestrator_mode(): void
+    {
+        $this->assertSame('orchestrator', RexProcess::Reporting->mode());
+        $this->assertSame(ProcessReadiness::Preview, RexProcess::Reporting->readiness());
+        $this->assertEmpty(RexProcess::Reporting->approvalTypes());
+    }
+
     public function test_recommendation_review_is_available_agent_mode(): void
     {
         $p = RexProcess::RecommendationReview;
@@ -108,6 +130,7 @@ class ProcessRegistryTest extends TestCase
             $this->assertSame(ProcessReadiness::Available, $p->readiness());
         }
         $this->assertNotContains(RexProcess::InvestigationSynthesis, $available);
+        $this->assertNotContains(RexProcess::Reporting, $available);
     }
 
     public function test_routable_by_llm_returns_only_available_agent_processes(): void

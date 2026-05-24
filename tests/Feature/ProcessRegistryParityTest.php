@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Enums\RexProcess;
+use App\Services\Agents\AgentActionExecutorService;
 use App\Services\Agents\AgentToolRegistry;
+use App\Services\Agents\BrevixAgentRunner;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -101,6 +103,77 @@ class ProcessRegistryParityTest extends TestCase
 
         $this->assertContains('POST api/agent-approvals/{id}/approve', $routes);
         $this->assertContains('POST api/agent-approvals/{id}/reject', $routes);
+    }
+
+    /**
+     * Tool keys added in Phase 4 that are not in any process's tools() list must still
+     * have both a registry entry and a registered Laravel route.
+     */
+    public function test_phase4_expansion_tool_keys_have_registered_routes(): void
+    {
+        $expansionKeys = ['transaction_detail', 'pending_recommendations', 'process_registry'];
+        $routeSuffixes = AgentToolRegistry::routeSuffixes();
+        $normalizedRegistered = array_map(
+            fn (string $uri) => preg_replace('/\{[^}]+\}/', '{companyId}', $uri),
+            $this->internalToolUris()
+        );
+
+        foreach ($expansionKeys as $toolKey) {
+            $this->assertArrayHasKey(
+                $toolKey,
+                $routeSuffixes,
+                "Phase 4 tool key '{$toolKey}' is missing from AgentToolRegistry::routeSuffixes()."
+            );
+
+            $normalizedExpected = preg_replace('/\{[^}]+\}/', '{companyId}', $routeSuffixes[$toolKey]);
+            $expectedUri = 'api/internal/agent-tools/' . $normalizedExpected;
+
+            $this->assertContains(
+                $expectedUri,
+                $normalizedRegistered,
+                "Phase 4 tool key '{$toolKey}' expects route '{$expectedUri}' but it is not registered."
+            );
+        }
+    }
+
+    /**
+     * Every action type whitelisted by BrevixAgentRunner must be supported by the executor.
+     */
+    public function test_runner_supported_actions_are_all_executor_supported(): void
+    {
+        $executor = app(AgentActionExecutorService::class);
+        $executorSupported = $executor->supportedActionTypes();
+
+        foreach (BrevixAgentRunner::SUPPORTED_RECOMMENDED_ACTIONS as $actionType) {
+            $this->assertContains(
+                $actionType,
+                $executorSupported,
+                "Action type '{$actionType}' is whitelisted by BrevixAgentRunner but has no executor case."
+            );
+        }
+    }
+
+    /**
+     * Every action type the executor supports must be declared by at least one process in the registry.
+     */
+    public function test_executor_supported_actions_appear_in_at_least_one_process(): void
+    {
+        $executor = app(AgentActionExecutorService::class);
+
+        $allRegistryTypes = [];
+        foreach (RexProcess::cases() as $process) {
+            foreach ($process->approvalTypes() as $type) {
+                $allRegistryTypes[] = $type;
+            }
+        }
+
+        foreach ($executor->supportedActionTypes() as $actionType) {
+            $this->assertContains(
+                $actionType,
+                $allRegistryTypes,
+                "Executor supports '{$actionType}' but it is not declared in any process's approvalTypes()."
+            );
+        }
     }
 
     /** @return list<string> */

@@ -10,6 +10,7 @@ use App\Models\InvestigationReportExport;
 use App\Models\User;
 use App\Services\InvestigationReportService;
 use App\Services\InvestigationService;
+use App\Support\ProfessionalServicesDisclaimer;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -170,7 +171,7 @@ class InvestigationReportExportTest extends TestCase
             ->assertOk()
             ->assertJsonPath(
                 'report.disclaimer',
-                'This report summarizes risk indicators and review activity. It is not a legal conclusion or proof of fraud.'
+                ProfessionalServicesDisclaimer::TEXT
             );
     }
 
@@ -383,11 +384,11 @@ class InvestigationReportExportTest extends TestCase
         $html = view('reports.investigation-pdf', ['report' => $report])->render();
 
         $this->assertStringContainsString(
-            'This report summarizes risk indicators and review activity.',
+            'Brevix AI provides informational financial risk indicators and workflow support.',
             $html,
         );
         $this->assertStringContainsString(
-            'It is not a legal conclusion or proof of fraud.',
+            'not proof of fraud or a professional opinion.',
             $html,
         );
     }
