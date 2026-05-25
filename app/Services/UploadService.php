@@ -8,22 +8,25 @@ use App\Jobs\ValidateUploadJob;
 use App\Models\Upload;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class UploadService
 {
     private UploadStorageService $storage;
+    private PlanPolicyService $planPolicy;
 
     public const SUPPORTED_IMPORT_TYPES = [
         'transaction_ledger', 'ap_invoice_register', 'ar_aging',
     ];
 
-    public function __construct(UploadStorageService $storage)
+    public function __construct(UploadStorageService $storage, PlanPolicyService $planPolicy)
     {
         $this->storage = $storage;
+        $this->planPolicy = $planPolicy;
     }
 
-    public function createSession(string $companyId, string $userId, array $data): array
+    public function createSession(string $companyId, string $userId, array $data, ?string $businessProfileId = null): array
     {
         $originalFilename = $data['originalFilename'];
         $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
@@ -34,8 +37,9 @@ class UploadService
 
         $claimedContentType = $data['claimedContentType'] ?? 'application/octet-stream';
         $fileSizeBytes = $data['fileSizeBytes'] ?? null;
+        $this->planPolicy->ensureUploadFileSizeAllowed($companyId, $fileSizeBytes !== null ? (int) $fileSizeBytes : null);
 
-        $upload = Upload::create([
+        $attributes = [
             'id' => (string) Str::uuid(),
             'company_id' => $companyId,
             'uploaded_by' => $userId,
@@ -49,9 +53,16 @@ class UploadService
             'status' => 'created',
             'status_detail' => 'Upload session created.',
             'quarantine_bucket' => config('filesystems.default', 'local'),
-        ]);
+        ];
 
-        $quarantineKey = "quarantine/{$companyId}/{$upload->id}_{$originalFilename}";
+        if ($businessProfileId && Schema::hasColumn('uploads', 'business_profile_id')) {
+            $attributes['business_profile_id'] = $businessProfileId;
+        }
+
+        $upload = Upload::create($attributes);
+
+        $contextPath = $businessProfileId ?: $companyId;
+        $quarantineKey = "quarantine/{$contextPath}/{$upload->id}_{$originalFilename}";
         $storageFilename = "{$upload->id}.{$extension}";
 
         $upload->update([
@@ -75,15 +86,15 @@ class UploadService
             'uploadHeaders' => ['Content-Type' => $claimedContentType],
             'quarantineKey' => $quarantineKey,
             'acceptedConstraints' => [
-                'maxFileSizeBytes' => 104857600, // 100MB
+                'maxFileSizeBytes' => $this->planPolicy->uploadMaxFileSizeBytes($companyId),
                 'acceptedExtensions' => ['.csv', '.xlsx'],
             ],
         ];
     }
 
-    public function completeDirectUpload(string $companyId, string $userId, string $uploadId): array
+    public function completeDirectUpload(string $companyId, string $userId, string $uploadId, ?string $businessProfileId = null): array
     {
-        $upload = Upload::where('id', $uploadId)->where('company_id', $companyId)->first();
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             throw new Exception('Upload not found', 404);
         }
@@ -93,6 +104,7 @@ class UploadService
 
         $stat = $this->storage->statStoredObject($upload->quarantine_key);
         $size = $stat['size'] ?? ($upload->file_size_bytes ?: 0);
+        $this->planPolicy->ensureUploadFileSizeAllowed($companyId, (int) $size);
 
         $upload->update([
             'status' => 'uploaded_to_quarantine',
@@ -116,9 +128,9 @@ class UploadService
         ];
     }
 
-    public function getDetail(string $companyId, string $uploadId): ?array
+    public function getDetail(string $companyId, string $uploadId, ?string $businessProfileId = null): ?array
     {
-        $upload = Upload::where('id', $uploadId)->where('company_id', $companyId)->first();
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             return null;
         }
@@ -148,10 +160,14 @@ class UploadService
         ];
     }
 
-    public function list(string $companyId): array
+    public function list(string $companyId, ?string $businessProfileId = null): array
     {
-        return Upload::where('company_id', $companyId)
-            ->orderBy('created_at', 'desc')
+        $query = Upload::where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('uploads', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+
+        return $query->orderBy('created_at', 'desc')
             ->get()
             ->map(function ($upload) {
                 return [
@@ -169,9 +185,9 @@ class UploadService
             })->toArray();
     }
 
-    public function delete(string $companyId, string $userId, string $uploadId): bool
+    public function delete(string $companyId, string $userId, string $uploadId, ?string $businessProfileId = null): bool
     {
-        $upload = Upload::where('id', $uploadId)->where('company_id', $companyId)->first();
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             throw new Exception('Upload not found', 404);
         }
@@ -208,18 +224,20 @@ class UploadService
         return true;
     }
 
-    public function getPreview(string $companyId, string $uploadId): array
+    public function getPreview(string $companyId, string $uploadId, ?string $businessProfileId = null): array
     {
-        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             throw new Exception('Upload not found', 404);
         }
 
         $inspection = DB::table('upload_inspections')
             ->where('upload_id', $uploadId)
-            ->where('company_id', $companyId)
-            ->orderBy('created_at', 'desc')
-            ->first();
+            ->where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('upload_inspections', 'business_profile_id')) {
+            $inspection->where('business_profile_id', $businessProfileId);
+        }
+        $inspection = $inspection->orderBy('created_at', 'desc')->first();
         if (! $inspection) {
             throw new Exception('Upload inspection is not ready yet', 409);
         }
@@ -302,16 +320,16 @@ class UploadService
         return [$fieldMappings, $confidenceHints];
     }
 
-    public function saveMapping(string $companyId, string $userId, string $uploadId, array $data): array
+    public function saveMapping(string $companyId, string $userId, string $uploadId, array $data, ?string $businessProfileId = null): array
     {
-        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             throw new Exception('Upload not found', 404);
         }
 
         $nextVersion = DB::table('upload_mapping_versions')->where('upload_id', $uploadId)->max('version_number') + 1;
 
-        $mappingId = DB::table('upload_mapping_versions')->insertGetId([
+        $mapping = [
             'upload_id' => $uploadId,
             'company_id' => $companyId,
             'version_number' => $nextVersion,
@@ -320,7 +338,12 @@ class UploadService
             'field_mappings' => json_encode($data['fieldMappings']),
             'confirmed_by' => $userId,
             'created_at' => now(),
-        ]);
+        ];
+        if ($businessProfileId && Schema::hasColumn('upload_mapping_versions', 'business_profile_id')) {
+            $mapping['business_profile_id'] = $businessProfileId;
+        }
+
+        $mappingId = DB::table('upload_mapping_versions')->insertGetId($mapping);
 
         $upload->update([
             'latest_mapping_version_id' => $mappingId,
@@ -332,9 +355,9 @@ class UploadService
         return ['id' => $mappingId, 'versionNumber' => $nextVersion];
     }
 
-    public function queueValidation(string $companyId, string $userId, string $uploadId): array
+    public function queueValidation(string $companyId, string $userId, string $uploadId, ?string $businessProfileId = null): array
     {
-        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             throw new Exception('Upload not found', 404);
         }
@@ -347,9 +370,9 @@ class UploadService
         return ['status' => 'validation_pending', 'statusDetail' => 'Validation has been queued.'];
     }
 
-    public function queuePromotion(string $companyId, string $userId, string $uploadId): array
+    public function queuePromotion(string $companyId, string $userId, string $uploadId, ?string $businessProfileId = null): array
     {
-        $upload = $this->findCompanyUpload($companyId, $uploadId);
+        $upload = $this->findCompanyUpload($companyId, $uploadId, $businessProfileId);
         if (! $upload) {
             throw new Exception('Upload not found', 404);
         }
@@ -367,10 +390,15 @@ class UploadService
         // Minimal stub
     }
 
-    private function findCompanyUpload(string $companyId, string $uploadId): ?Upload
+    private function findCompanyUpload(string $companyId, string $uploadId, ?string $businessProfileId = null): ?Upload
     {
-        return Upload::where('id', $uploadId)
-            ->where('company_id', $companyId)
-            ->first();
+        $query = Upload::where('id', $uploadId)
+            ->where('company_id', $companyId);
+
+        if ($businessProfileId && Schema::hasColumn('uploads', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+
+        return $query->first();
     }
 }

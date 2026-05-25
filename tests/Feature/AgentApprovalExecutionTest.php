@@ -87,6 +87,12 @@ class AgentApprovalExecutionTest extends TestCase
             $table->text('title');
             $table->text('detail')->nullable();
             $table->json('evidence')->nullable();
+            $table->json('reason_codes')->default('[]');
+            $table->text('source_system')->nullable();
+            $table->uuid('source_recommendation_id')->nullable();
+            $table->decimal('confidence_score', 5, 4)->nullable();
+            $table->json('evidence_refs')->default('[]');
+            $table->json('comparison_window')->nullable();
             $table->text('status')->default('open');
             $table->integer('priority_score')->nullable();
             $table->uuid('reviewed_by')->nullable();

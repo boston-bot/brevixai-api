@@ -2,20 +2,23 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\BusinessProfileAccessException;
 use App\Http\Controllers\Controller;
 use App\Models\Upload;
 use App\Models\UploadRowError;
+use App\Services\BusinessProfileContextService;
 use App\Services\UploadService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 
 class UploadController extends Controller
 {
     protected UploadService $uploadService;
 
-    public function __construct(UploadService $uploadService)
+    public function __construct(UploadService $uploadService, private readonly BusinessProfileContextService $businessProfileContext)
     {
         $this->uploadService = $uploadService;
     }
@@ -25,12 +28,12 @@ class UploadController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $data = $this->uploadService->list($companyId);
+        $data = $this->uploadService->list($context->companyId, $context->businessProfileId);
 
         return response()->json($data);
     }
@@ -40,12 +43,12 @@ class UploadController extends Controller
      */
     public function show(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $detail = $this->uploadService->getDetail($companyId, $id);
+        $detail = $this->uploadService->getDetail($context->companyId, $id, $context->businessProfileId);
         if (! $detail) {
             return response()->json(['error' => 'Upload not found'], 404);
         }
@@ -58,9 +61,9 @@ class UploadController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $request->validate([
@@ -71,7 +74,7 @@ class UploadController extends Controller
         ]);
 
         try {
-            $result = $this->uploadService->createSession($companyId, $request->user()->id, $request->all());
+            $result = $this->uploadService->createSession($context->companyId, $request->user()->id, $request->all(), $context->businessProfileId);
 
             return response()->json($result, 201);
         } catch (Exception $e) {
@@ -84,13 +87,13 @@ class UploadController extends Controller
      */
     public function complete(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $result = $this->uploadService->completeDirectUpload($companyId, $request->user()->id, $id);
+            $result = $this->uploadService->completeDirectUpload($context->companyId, $request->user()->id, $id, $context->businessProfileId);
 
             return response()->json($result, 202);
         } catch (Exception $e) {
@@ -103,13 +106,13 @@ class UploadController extends Controller
      */
     public function destroy(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $this->uploadService->delete($companyId, $request->user()->id, $id);
+            $this->uploadService->delete($context->companyId, $request->user()->id, $id, $context->businessProfileId);
 
             return response()->json(['success' => true]);
         } catch (Exception $e) {
@@ -122,13 +125,13 @@ class UploadController extends Controller
      */
     public function preview(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $result = $this->uploadService->getPreview($companyId, $id);
+            $result = $this->uploadService->getPreview($context->companyId, $id, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Exception $e) {
@@ -141,13 +144,13 @@ class UploadController extends Controller
      */
     public function mappings(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $result = $this->uploadService->saveMapping($companyId, $request->user()->id, $id, $request->all());
+            $result = $this->uploadService->saveMapping($context->companyId, $request->user()->id, $id, $request->all(), $context->businessProfileId);
 
             return response()->json($result);
         } catch (Exception $e) {
@@ -160,13 +163,13 @@ class UploadController extends Controller
      */
     public function validateUpload(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $result = $this->uploadService->queueValidation($companyId, $request->user()->id, $id);
+            $result = $this->uploadService->queueValidation($context->companyId, $request->user()->id, $id, $context->businessProfileId);
 
             return response()->json($result, 202);
         } catch (Exception $e) {
@@ -179,19 +182,26 @@ class UploadController extends Controller
      */
     public function errors(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $upload = Upload::where('id', $id)->where('company_id', $companyId)->first();
+        $uploadQuery = Upload::where('id', $id)->where('company_id', $context->companyId);
+        if ($context->businessProfileId && Schema::hasColumn('uploads', 'business_profile_id')) {
+            $uploadQuery->where('business_profile_id', $context->businessProfileId);
+        }
+        $upload = $uploadQuery->first();
         if (! $upload) {
             return response()->json(['error' => 'Upload not found'], 404);
         }
 
         $errors = UploadRowError::where('upload_id', $id)
-            ->where('company_id', $companyId)
-            ->orderBy('source_row_number')
+            ->where('company_id', $context->companyId);
+        if ($context->businessProfileId && Schema::hasColumn('upload_row_errors', 'business_profile_id')) {
+            $errors->where('business_profile_id', $context->businessProfileId);
+        }
+        $errors = $errors->orderBy('source_row_number')
             ->get(['id', 'source_sheet_name', 'source_row_number', 'canonical_field_key', 'severity', 'error_code', 'message', 'raw_value', 'created_at']);
 
         return response()->json(['errors' => $errors]);
@@ -202,17 +212,26 @@ class UploadController extends Controller
      */
     public function promote(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $result = $this->uploadService->queuePromotion($companyId, $request->user()->id, $id);
+            $result = $this->uploadService->queuePromotion($context->companyId, $request->user()->id, $id, $context->businessProfileId);
 
             return response()->json($result, 202);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
+        }
+    }
+
+    private function resolveContext(Request $request): \App\Services\BusinessProfileContext|JsonResponse
+    {
+        try {
+            return $this->businessProfileContext->resolveForRequest($request);
+        } catch (BusinessProfileAccessException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->statusCode());
         }
     }
 }

@@ -8,6 +8,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Exception;
@@ -73,8 +74,9 @@ class ValidateUploadJob implements ShouldQueue
             }
 
             $validationRunId = (string) Str::uuid();
+            $businessProfileId = property_exists($upload, 'business_profile_id') ? $upload->business_profile_id : null;
 
-            DB::table('upload_validation_runs')->insert([
+            $validationRun = [
                 'id' => $validationRunId,
                 'upload_id' => $this->uploadId,
                 'company_id' => $this->companyId,
@@ -87,10 +89,15 @@ class ValidateUploadJob implements ShouldQueue
                 'warning_count' => 0,
                 'summary' => json_encode([]),
                 'created_at' => now(),
-            ]);
+            ];
+            if ($businessProfileId && Schema::hasColumn('upload_validation_runs', 'business_profile_id')) {
+                $validationRun['business_profile_id'] = $businessProfileId;
+            }
+
+            DB::table('upload_validation_runs')->insert($validationRun);
 
             [$totalRows, $validRows, $blockingErrors, $warnings, $rowErrors] =
-                $this->validateRows($contents, $fieldMappings, $validationRunId, $mappingRow->source_sheet_name ?? 'Sheet1');
+                $this->validateRows($contents, $fieldMappings, $validationRunId, $mappingRow->source_sheet_name ?? 'Sheet1', $businessProfileId);
 
             foreach (array_chunk($rowErrors, 500) as $chunk) {
                 DB::table('upload_row_errors')->insert($chunk);
@@ -140,7 +147,7 @@ class ValidateUploadJob implements ShouldQueue
         }
     }
 
-    private function validateRows(string $contents, array $fieldMappings, string $validationRunId, string $sheetName): array
+    private function validateRows(string $contents, array $fieldMappings, string $validationRunId, string $sheetName, ?string $businessProfileId): array
     {
         $stream = fopen('php://temp', 'r+');
         fwrite($stream, $contents);
@@ -174,7 +181,7 @@ class ValidateUploadJob implements ShouldQueue
                 if ($amountRaw !== '') {
                     $cleaned = preg_replace('/[^0-9.\-]/', '', $amountRaw);
                     if (! is_numeric($cleaned) || $cleaned === '') {
-                        $rowErrors[] = [
+                        $error = [
                             'id' => (string) Str::uuid(),
                             'upload_id' => $this->uploadId,
                             'company_id' => $this->companyId,
@@ -188,6 +195,10 @@ class ValidateUploadJob implements ShouldQueue
                             'raw_value' => $amountRaw,
                             'created_at' => now(),
                         ];
+                        if ($businessProfileId && Schema::hasColumn('upload_row_errors', 'business_profile_id')) {
+                            $error['business_profile_id'] = $businessProfileId;
+                        }
+                        $rowErrors[] = $error;
                         $blockingErrors++;
                         $rowIsValid = false;
                     }
@@ -197,7 +208,7 @@ class ValidateUploadJob implements ShouldQueue
             if (isset($fieldMappings['date']) && $fieldMappings['date'] !== null) {
                 $dateRaw = trim($rowData[$fieldMappings['date']] ?? '');
                 if ($dateRaw !== '' && strtotime($dateRaw) === false) {
-                    $rowErrors[] = [
+                    $error = [
                         'id' => (string) Str::uuid(),
                         'upload_id' => $this->uploadId,
                         'company_id' => $this->companyId,
@@ -211,6 +222,10 @@ class ValidateUploadJob implements ShouldQueue
                         'raw_value' => $dateRaw,
                         'created_at' => now(),
                     ];
+                    if ($businessProfileId && Schema::hasColumn('upload_row_errors', 'business_profile_id')) {
+                        $error['business_profile_id'] = $businessProfileId;
+                    }
+                    $rowErrors[] = $error;
                     $warnings++;
                 }
             }

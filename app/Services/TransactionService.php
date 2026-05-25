@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class TransactionService
 {
@@ -144,8 +145,15 @@ class TransactionService
     // Transaction Detail
     // -------------------------------------------------------------------------
 
-    public function detail(string $companyId, string $transactionId): ?array
+    public function detail(string $companyId, string $transactionId, ?string $businessProfileId = null): ?array
     {
+        $profileFilter = '';
+        $params = [$companyId, $transactionId];
+        if ($businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+            $profileFilter = ' AND t.business_profile_id = ?';
+            $params[] = $businessProfileId;
+        }
+
         $base = DB::selectOne(
             "SELECT
                 t.id, t.date, t.department, t.vendor_customer AS vendor,
@@ -159,8 +167,8 @@ class TransactionService
                 u.status AS upload_status, u.created_at AS upload_created_at
              FROM all_transactions t
              LEFT JOIN uploads u ON u.id = t.upload_id
-             WHERE t.company_id = ? AND t.id = ?",
-            [$companyId, $transactionId]
+             WHERE t.company_id = ? AND t.id = ?{$profileFilter}",
+            $params
         );
 
         if (!$base) return null;
@@ -229,11 +237,18 @@ class TransactionService
     // Review State Toggle
     // -------------------------------------------------------------------------
 
-    public function setReviewState(string $companyId, string $userId, string $transactionId, bool $marked): ?array
+    public function setReviewState(string $companyId, string $userId, string $transactionId, bool $marked, ?string $businessProfileId = null): ?array
     {
+        $profileFilter = '';
+        $params = [$companyId, $transactionId];
+        if ($businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+            $profileFilter = ' AND business_profile_id = ?';
+            $params[] = $businessProfileId;
+        }
+
         $exists = DB::selectOne(
-            "SELECT id FROM all_transactions WHERE company_id = ? AND id = ? LIMIT 1",
-            [$companyId, $transactionId]
+            "SELECT id FROM all_transactions WHERE company_id = ? AND id = ?{$profileFilter} LIMIT 1",
+            $params
         );
 
         if (!$exists) return null;
@@ -267,6 +282,11 @@ class TransactionService
     {
         $conditions = ['t.company_id = ?'];
         $params = [$companyId];
+
+        if (!empty($filters['business_profile_id']) && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+            $conditions[] = 't.business_profile_id = ?';
+            $params[] = $filters['business_profile_id'];
+        }
 
         if (!empty($filters['date_from'])) {
             $conditions[] = 't.date >= ?';

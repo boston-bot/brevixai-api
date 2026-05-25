@@ -4,11 +4,12 @@ namespace App\Services\Agents;
 
 use App\Enums\RexProcess;
 use App\Exceptions\BrevixAgentRunFailed;
-use App\Services\Agents\AgentToolRegistry;
 use App\Models\AgentActionApproval;
 use App\Models\AgentRun;
 use App\Models\AgentStep;
+use App\Models\ChatMessage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class BrevixAgentRunner
@@ -18,7 +19,7 @@ class BrevixAgentRunner
     public const MAX_RESPONSE_SIZE = 8000;
 
     /** @var array<int, string> */
-    public const SUPPORTED_RECOMMENDED_ACTIONS = ['create_alert'];
+    public const SUPPORTED_RECOMMENDED_ACTIONS = ['create_alert', 'create_case', 'flag_transaction', 'escalate_review'];
 
     public function __construct(private readonly BrevixAgentClient $agentClient) {}
 
@@ -40,6 +41,7 @@ class BrevixAgentRunner
     public function run(array $input): array
     {
         $companyId = $input['company_id'];
+        $businessProfileId = is_string($input['business_profile_id'] ?? null) ? $input['business_profile_id'] : null;
         $userId = $input['user_id'];
         $message = $input['message'];
         $maxResponseSize = min(
@@ -47,14 +49,19 @@ class BrevixAgentRunner
             max(256, (int) ($input['max_response_size'] ?? self::DEFAULT_MAX_RESPONSE_SIZE))
         );
 
-        $agentRun = AgentRun::create([
+        $agentRunAttributes = [
             'company_id' => $companyId,
             'user_id' => $userId,
             'conversation_id' => $input['conversation_id'] ?? null,
             'status' => 'running',
             'input_message' => $message,
             'started_at' => now(),
-        ]);
+        ];
+        if ($businessProfileId && Schema::hasColumn('agent_runs', 'business_profile_id')) {
+            $agentRunAttributes['business_profile_id'] = $businessProfileId;
+        }
+
+        $agentRun = AgentRun::create($agentRunAttributes);
 
         Log::info('agent.request.received', [
             'agent_run_id' => $agentRun->id,
@@ -64,12 +71,16 @@ class BrevixAgentRunner
         ]);
 
         try {
+            $conversationHistory = $this->loadConversationHistory($input['conversation_id'] ?? null, $companyId, $businessProfileId);
+
             $agentResponse = $this->agentClient->run([
                 'agent_run_id' => $agentRun->id,
                 'company_id' => $companyId,
+                'business_profile_id' => $businessProfileId,
                 'user_id' => $userId,
                 'conversation_id' => $input['conversation_id'] ?? null,
                 'message' => $message,
+                'conversation_history' => $conversationHistory,
                 'requested_action' => $input['requested_action'] ?? 'risk_review',
                 'date_range' => $input['date_range'] ?? null,
                 'max_response_size' => $maxResponseSize,
@@ -147,6 +158,127 @@ class BrevixAgentRunner
         }
     }
 
+    /**
+     * Run the agent with SSE streaming, calling $emitEvent for each event received.
+     *
+     * Persists the AgentRun and related records when the stream completes.
+     *
+     * @param  array{company_id: string, user_id: string, message: string, conversation_id?: string|null, requested_action?: string|null, page_context?: mixed}  $input
+     * @param  callable(string $type, array $payload): void  $emitEvent
+     * @return array<string, mixed>
+     *
+     * @throws Throwable
+     */
+    public function runStreaming(array $input, callable $emitEvent): array
+    {
+        $companyId = $input['company_id'];
+        $businessProfileId = is_string($input['business_profile_id'] ?? null) ? $input['business_profile_id'] : null;
+        $userId = $input['user_id'];
+        $message = $input['message'];
+        $maxResponseSize = min(
+            self::MAX_RESPONSE_SIZE,
+            max(256, (int) ($input['max_response_size'] ?? self::DEFAULT_MAX_RESPONSE_SIZE))
+        );
+
+        $agentRunAttributes = [
+            'company_id' => $companyId,
+            'user_id' => $userId,
+            'conversation_id' => $input['conversation_id'] ?? null,
+            'status' => 'running',
+            'input_message' => $message,
+            'started_at' => now(),
+        ];
+        if ($businessProfileId && Schema::hasColumn('agent_runs', 'business_profile_id')) {
+            $agentRunAttributes['business_profile_id'] = $businessProfileId;
+        }
+
+        $agentRun = AgentRun::create($agentRunAttributes);
+
+        Log::info('agent.stream.started', [
+            'agent_run_id' => $agentRun->id,
+            'company_id' => $companyId,
+            'user_id' => $userId,
+        ]);
+
+        try {
+            $conversationHistory = $this->loadConversationHistory($input['conversation_id'] ?? null, $companyId, $businessProfileId);
+
+            $assembled = $this->agentClient->runStream([
+                'agent_run_id' => $agentRun->id,
+                'company_id' => $companyId,
+                'business_profile_id' => $businessProfileId,
+                'user_id' => $userId,
+                'conversation_id' => $input['conversation_id'] ?? null,
+                'message' => $message,
+                'conversation_history' => $conversationHistory,
+                'requested_action' => $input['requested_action'] ?? 'risk_review',
+                'page_context' => $input['page_context'] ?? (object) [],
+                'optional_deterministic_tools' => $this->optionalDeterministicTools($companyId, $input['requested_action'] ?? 'risk_review'),
+                'tool_policy' => $this->toolPolicy(),
+            ], $emitEvent);
+
+            // $assembled comes from the message.completed payload
+            $steps = is_array($assembled['steps'] ?? null) ? $assembled['steps'] : [];
+            $rawActions = is_array($assembled['recommendedActions'] ?? null) ? $assembled['recommendedActions'] : [];
+            $intent = $this->boundedString($assembled['intent'] ?? 'unknown', 120);
+            $responseMessage = $this->boundedString($assembled['message'] ?? '', $maxResponseSize);
+
+            $this->persistSteps($agentRun, $steps);
+            $actionGate = $this->persistActionApprovals($agentRun, $rawActions);
+            $actions = $actionGate['actions'];
+
+            $agentRun->update([
+                'status' => 'completed',
+                'intent' => $intent,
+                'final_response' => $responseMessage,
+                'model_provider' => $assembled['modelProvider'] ?? null,
+                'model_name' => $assembled['modelName'] ?? null,
+                'tokens_input' => $assembled['usage']['tokens_input'] ?? null,
+                'tokens_output' => $assembled['usage']['tokens_output'] ?? null,
+                'cost_estimate' => $assembled['usage']['cost_estimate'] ?? null,
+                'completed_at' => now(),
+            ]);
+
+            $degradedTools = $this->arrayValue($assembled['degradedTools'] ?? []);
+
+            Log::info('agent.stream.completed', [
+                'agent_run_id' => $agentRun->id,
+                'company_id' => $companyId,
+                'intent' => $intent,
+            ]);
+
+            $requiresReview = collect($actions)->contains(
+                fn (array $action): bool => (bool) ($action['requires_approval'] ?? true)
+            );
+
+            return [
+                'message' => $responseMessage,
+                'intent' => $intent,
+                'findings' => $this->arrayValue($assembled['findings'] ?? []),
+                'recommended_actions' => $actions,
+                'can_create_alert' => collect($actions)->contains(fn (array $action): bool => ($action['type'] ?? null) === 'create_alert'),
+                'requires_review' => $requiresReview,
+                'trace_id' => $agentRun->id,
+                'investigative_synthesis' => is_array($assembled['investigativeSynthesis'] ?? null) ? $assembled['investigativeSynthesis'] : null,
+                'degraded_tools' => array_values(array_filter($degradedTools, fn (mixed $t): bool => is_array($t))),
+            ];
+        } catch (Throwable $e) {
+            $agentRun->update([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'error_message' => $e->getMessage(),
+            ]);
+
+            Log::warning('agent.stream.failed', [
+                'agent_run_id' => $agentRun->id,
+                'company_id' => $companyId,
+                'error_class' => $e::class,
+            ]);
+
+            throw new \App\Exceptions\BrevixAgentRunFailed($agentRun->id, $e);
+        }
+    }
+
     private function persistSteps(AgentRun $agentRun, array $steps): void
     {
         foreach ($steps as $step) {
@@ -211,14 +343,19 @@ class BrevixAgentRunner
             $action['requires_approval'] = true;
             $action['requires_review'] = true;
 
-            $approval = AgentActionApproval::create([
+            $approvalAttributes = [
                 'agent_run_id' => $agentRun->id,
                 'company_id' => $agentRun->company_id,
                 'user_id' => $agentRun->user_id,
                 'action_type' => $actionType,
                 'action_payload' => $this->arrayValue($action['payload'] ?? []),
                 'status' => 'pending',
-            ]);
+            ];
+            if ($agentRun->business_profile_id && Schema::hasColumn('agent_action_approvals', 'business_profile_id')) {
+                $approvalAttributes['business_profile_id'] = $agentRun->business_profile_id;
+            }
+
+            $approval = AgentActionApproval::create($approvalAttributes);
 
             $persistedActions[] = array_merge($action, ['approval_id' => $approval->id]);
         }
@@ -371,5 +508,37 @@ class BrevixAgentRunner
         }
 
         return $degraded;
+    }
+
+    /**
+     * Load the last 8 messages from the chat session to provide conversation context to the agent.
+     * Returns null if no session ID is provided or no messages exist.
+     *
+     * @return list<array{role: string, content: string}>|null
+     */
+    private function loadConversationHistory(?string $conversationId, string $companyId, ?string $businessProfileId = null): ?array
+    {
+        if (! $conversationId || ! \Illuminate\Support\Str::isUuid($conversationId)) {
+            return null;
+        }
+
+        $messages = ChatMessage::whereHas('session', function ($query) use ($conversationId, $companyId, $businessProfileId): void {
+            $query->where('id', $conversationId)->where('company_id', $companyId);
+            if ($businessProfileId && Schema::hasColumn('chat_sessions', 'business_profile_id')) {
+                $query->where('business_profile_id', $businessProfileId);
+            }
+        })
+            ->orderBy('created_at', 'desc')
+            ->limit(8)
+            ->get(['role', 'content'])
+            ->reverse()
+            ->values()
+            ->map(fn (ChatMessage $m): array => [
+                'role' => (string) $m->role,
+                'content' => (string) $m->content,
+            ])
+            ->all();
+
+        return count($messages) > 0 ? $messages : null;
     }
 }

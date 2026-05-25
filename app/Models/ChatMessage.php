@@ -15,7 +15,7 @@ class ChatMessage extends Model
     public $timestamps = false; // Only created_at exists in DB
 
     protected $fillable = [
-        'session_id', 'company_id', 'role', 'content', 'structured_payload',
+        'session_id', 'company_id', 'business_profile_id', 'role', 'content', 'structured_payload',
     ];
 
     protected $casts = [

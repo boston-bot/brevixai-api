@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\BusinessProfileAccessException;
 use App\Http\Controllers\Controller;
 use App\Models\AgentActionApproval;
 use App\Services\Agents\AgentActionExecutorService;
+use App\Services\BusinessProfileContextService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +14,10 @@ use Throwable;
 
 class AgentApprovalController extends Controller
 {
-    public function __construct(private AgentActionExecutorService $executor) {}
+    public function __construct(
+        private AgentActionExecutorService $executor,
+        private BusinessProfileContextService $businessProfileContext,
+    ) {}
 
     /**
      * POST /api/agent-approvals/{id}/approve
@@ -30,6 +35,11 @@ class AgentApprovalController extends Controller
 
         if (! $approval) {
             return response()->json(['error' => 'Approval not found'], 404);
+        }
+
+        $authorizationError = $this->profileAuthorizationError($request, $approval);
+        if ($authorizationError) {
+            return $authorizationError;
         }
 
         if ($approval->status !== 'pending') {
@@ -73,6 +83,11 @@ class AgentApprovalController extends Controller
             return response()->json(['error' => 'Approval not found'], 404);
         }
 
+        $authorizationError = $this->profileAuthorizationError($request, $approval);
+        if ($authorizationError) {
+            return $authorizationError;
+        }
+
         if ($approval->status !== 'pending') {
             return response()->json(['error' => 'This action has already been resolved.'], 409);
         }
@@ -96,5 +111,24 @@ class AgentApprovalController extends Controller
             'approval_id' => $approval->id,
             'status'      => 'rejected',
         ]);
+    }
+
+    private function profileAuthorizationError(Request $request, AgentActionApproval $approval): ?JsonResponse
+    {
+        if (! $approval->business_profile_id) {
+            return null;
+        }
+
+        try {
+            $this->businessProfileContext->contextForProfile(
+                $request->user(),
+                (string) $approval->business_profile_id,
+                (string) $approval->company_id,
+            );
+
+            return null;
+        } catch (BusinessProfileAccessException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->statusCode());
+        }
     }
 }

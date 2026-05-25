@@ -27,20 +27,21 @@ class RexOrchestratorService
             'entity_graph_review',
             'case_management',
             'reporting',
+            'tax_notice_review',
         ];
     }
 
-    public function handle(string $companyId, string $content): ?array
+    public function handle(string $companyId, string $content, ?string $businessProfileId = null): ?array
     {
         $intent = $this->inferIntent($content);
         if (! $intent) {
             return null;
         }
 
-        return $this->handleRoute($companyId, $intent);
+        return $this->handleRoute($companyId, $intent, $businessProfileId);
     }
 
-    public function handleRoute(string $companyId, string $route): ?array
+    public function handleRoute(string $companyId, string $route, ?string $businessProfileId = null): ?array
     {
         return match ($route) {
             'dashboard' => $this->dashboard($companyId),
@@ -54,8 +55,8 @@ class RexOrchestratorService
             'alert_recommendations' => $this->alertRecommendations($companyId),
             'case_recommendations' => $this->caseRecommendations($companyId),
             'controls' => $this->controls($companyId),
-            'transactions' => $this->transactions($companyId),
-            'transaction_lookup' => $this->transactions($companyId),
+            'transactions' => $this->transactions($companyId, $businessProfileId),
+            'transaction_lookup' => $this->transactions($companyId, $businessProfileId),
             'dashboard_health' => $this->dashboardHealth($companyId),
             'controls_review' => $this->controls($companyId),
             'reconciliation_review' => $this->reconciliation($companyId),
@@ -247,9 +248,14 @@ class RexOrchestratorService
         );
     }
 
-    private function transactions(string $companyId): array
+    private function transactions(string $companyId, ?string $businessProfileId = null): array
     {
-        $data = app(TransactionService::class)->list($companyId, ['limit' => 25]);
+        $filters = ['limit' => 25];
+        if ($businessProfileId) {
+            $filters['business_profile_id'] = $businessProfileId;
+        }
+
+        $data = app(TransactionService::class)->list($companyId, $filters);
 
         return $this->result(
             'transactions',

@@ -4,12 +4,21 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Subscription;
+use App\Services\PlanPolicyService;
+use App\Services\StripeService;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class SubscriptionController extends Controller
 {
+    public function __construct(
+        private readonly StripeService $stripeService,
+        private readonly PlanPolicyService $planPolicy,
+    ) {}
+
     /**
      * GET /api/subscriptions
      */
@@ -23,7 +32,7 @@ class SubscriptionController extends Controller
 
         $subscription = Subscription::firstOrCreate(
             ['company_id' => $companyId],
-            ['tier' => 'starter', 'status' => 'active']
+            ['tier' => 'free', 'status' => 'active']
         );
 
         return response()->json([
@@ -35,6 +44,9 @@ class SubscriptionController extends Controller
 
     /**
      * POST /api/subscriptions/checkout
+     *
+     * Expects { tier, paymentMethodId } where paymentMethodId is a pm_xxx token
+     * collected by Stripe.js on the frontend — never raw card numbers.
      */
     public function checkout(Request $request): JsonResponse
     {
@@ -45,34 +57,77 @@ class SubscriptionController extends Controller
         }
 
         $validated = $request->validate([
-            'tier' => ['required', 'string', Rule::in(['starter', 'growth', 'risk-advisory', 'accounting', 'accounting-firm'])],
-            'paymentMethod' => ['required', 'array'],
-            'paymentMethod.cardName' => ['required', 'string', 'max:255'],
-            'paymentMethod.lastFour' => ['required', 'digits:4'],
-            'paymentMethod.expiry' => ['required', 'string', 'regex:/^\d{2}\/\d{2}$/'],
+            'tier' => ['required', 'string', Rule::in(['free', 'starter', 'growth', 'risk-advisory', 'accounting', 'accounting-firm'])],
+            'paymentMethodId' => ['required', 'string'],
         ]);
 
         $tier = $this->normalizeTier($validated['tier']);
 
-        $subscription = Subscription::updateOrCreate(
-            ['company_id' => $companyId],
-            [
-                'tier' => $tier,
-                'status' => 'active',
-                'updated_at' => now(),
-            ]
-        );
+        if (in_array($tier, ['free', 'starter'], true)) {
+            return response()->json(['error' => "No payment required for the {$tier} tier"], 422);
+        }
 
-        return response()->json([
-            'status' => 'succeeded',
-            'tier' => $subscription->tier,
-            'subscription' => [
-                'companyId' => $subscription->company_id,
+        $priceId = config("services.stripe.price_ids.{$tier}");
+        if (!$priceId) {
+            return response()->json(['error' => "No Stripe price configured for tier: {$tier}"], 422);
+        }
+
+        try {
+            $user = $request->user();
+            $company = $user->company;
+
+            $customerId = $this->stripeService->createOrRetrieveCustomer(
+                $companyId,
+                $user->email,
+                $company->name ?? $companyId
+            );
+
+            $this->stripeService->attachPaymentMethod($customerId, $validated['paymentMethodId']);
+
+            $stripeSub = $this->stripeService->createSubscription($customerId, $priceId);
+
+            DB::beginTransaction();
+
+            $subscription = Subscription::updateOrCreate(
+                ['company_id' => $companyId],
+                [
+                    'tier' => $tier,
+                    'status' => $stripeSub->status === 'active' ? 'active' : $stripeSub->status,
+                    'stripe_customer_id' => $customerId,
+                    'stripe_subscription_id' => $stripeSub->id,
+                    'current_period_end' => $stripeSub->current_period_end
+                        ? \Carbon\Carbon::createFromTimestamp($stripeSub->current_period_end)
+                        : null,
+                    'updated_at' => now(),
+                ]
+            );
+
+            DB::commit();
+
+            $response = [
                 'tier' => $subscription->tier,
-                'status' => $subscription->status,
-                'currentPeriodEnd' => $subscription->current_period_end,
-            ],
-        ]);
+                'subscription' => [
+                    'companyId' => $subscription->company_id,
+                    'tier' => $subscription->tier,
+                    'status' => $subscription->status,
+                    'currentPeriodEnd' => $subscription->current_period_end,
+                ],
+            ];
+
+            // Return client_secret so the frontend can confirm 3DS if required
+            if ($stripeSub->status === 'incomplete') {
+                $paymentIntent = $stripeSub->latest_invoice?->payment_intent;
+                $response['status'] = 'requires_action';
+                $response['clientSecret'] = $paymentIntent?->client_secret;
+            } else {
+                $response['status'] = 'succeeded';
+            }
+
+            return response()->json($response);
+        } catch (Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     /**
@@ -86,26 +141,32 @@ class SubscriptionController extends Controller
             return response()->json(['error' => 'No company associated with account'], 403);
         }
 
-        $subscription = Subscription::updateOrCreate(
-            ['company_id' => $companyId],
-            [
+        $subscription = Subscription::where('company_id', $companyId)->first();
+
+        if (!$subscription?->stripe_subscription_id) {
+            return response()->json(['error' => 'No active Stripe subscription found'], 404);
+        }
+
+        try {
+            $this->stripeService->cancelSubscription($subscription->stripe_subscription_id);
+
+            $subscription->update([
                 'tier' => 'starter',
                 'status' => 'canceled',
                 'updated_at' => now(),
-            ]
-        );
+            ]);
 
-        return response()->json([
-            'status' => 'canceled',
-            'tier' => $subscription->tier,
-        ]);
+            return response()->json([
+                'status' => 'canceled',
+                'tier' => $subscription->tier,
+            ]);
+        } catch (Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     private function normalizeTier(string $tier): string
     {
-        return match ($tier) {
-            'accounting', 'accounting-firm' => 'risk-advisory',
-            default => $tier,
-        };
+        return $this->planPolicy->normalizeTier($tier);
     }
 }

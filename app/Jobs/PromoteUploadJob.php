@@ -7,6 +7,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -74,10 +75,11 @@ class PromoteUploadJob implements ShouldQueue
 
             $importBatchId = (string) Str::uuid();
             $sheetName = $mappingRow->source_sheet_name ?? 'Sheet1';
+            $businessProfileId = property_exists($upload, 'business_profile_id') ? $upload->business_profile_id : null;
 
-            $importedCount = $this->importRows($contents, $fieldMappings, $importBatchId, $sheetName);
+            $importedCount = $this->importRows($contents, $fieldMappings, $importBatchId, $sheetName, $businessProfileId);
 
-            DB::table('import_batches')->insert([
+            $batch = [
                 'id' => $importBatchId,
                 'upload_id' => $this->uploadId,
                 'company_id' => $this->companyId,
@@ -87,7 +89,11 @@ class PromoteUploadJob implements ShouldQueue
                 'imported_row_count' => $importedCount,
                 'promoted_by' => $this->userId,
                 'promoted_at' => now(),
-            ]);
+            ];
+            if ($businessProfileId && \Illuminate\Support\Facades\Schema::hasColumn('import_batches', 'business_profile_id')) {
+                $batch['business_profile_id'] = $businessProfileId;
+            }
+            DB::table('import_batches')->insert($batch);
 
             DB::table('uploads')->where('id', $this->uploadId)->update([
                 'status' => 'promoted',
@@ -95,6 +101,10 @@ class PromoteUploadJob implements ShouldQueue
                 'row_count' => $importedCount,
                 'promoted_at' => now(),
             ]);
+
+            Cache::forget("risk_score:vendor:{$this->companyId}");
+            Cache::forget("risk_score:reconciliation:{$this->companyId}");
+            Cache::forget("risk_score:entity_relationship:{$this->companyId}");
         } catch (Exception $e) {
             DB::table('uploads')->where('id', $this->uploadId)->update([
                 'status' => 'failed',
@@ -104,7 +114,7 @@ class PromoteUploadJob implements ShouldQueue
         }
     }
 
-    private function importRows(string $contents, array $fieldMappings, string $importBatchId, string $sheetName): int
+    private function importRows(string $contents, array $fieldMappings, string $importBatchId, string $sheetName, ?string $businessProfileId): int
     {
         $stream = fopen('php://temp', 'r+');
         fwrite($stream, $contents);
@@ -146,7 +156,7 @@ class PromoteUploadJob implements ShouldQueue
             $rawJson = json_encode($rowData);
             $contentHash = hash('sha256', $this->uploadId . ':' . $rowNumber . ':' . $rawJson);
 
-            $rows[] = array_merge($mapped, [
+            $insert = array_merge($mapped, [
                 'id' => (string) Str::uuid(),
                 'upload_id' => $this->uploadId,
                 'company_id' => $this->companyId,
@@ -157,6 +167,12 @@ class PromoteUploadJob implements ShouldQueue
                 'row_content_hash' => $contentHash,
                 'validation_status' => 'promoted',
             ]);
+
+            if ($businessProfileId && \Illuminate\Support\Facades\Schema::hasColumn('transactions', 'business_profile_id')) {
+                $insert['business_profile_id'] = $businessProfileId;
+            }
+
+            $rows[] = $insert;
         }
 
         fclose($stream);

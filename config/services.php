@@ -57,4 +57,13 @@ return [
         'timeout' => env('BREVIX_AGENT_TIMEOUT', 60),
     ],
 
+    'stripe' => [
+        'key' => env('STRIPE_SECRET_KEY'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'price_ids' => [
+            'growth' => env('STRIPE_PRICE_GROWTH'),
+            'risk-advisory' => env('STRIPE_PRICE_RISK_ADVISORY'),
+        ],
+    ],
+
 ];
