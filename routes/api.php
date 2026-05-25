@@ -1,8 +1,8 @@
 <?php
 
+use App\Http\Controllers\Api\ActionPlanController;
 use App\Http\Controllers\Api\AgentApprovalController;
 use App\Http\Controllers\Api\AlertController;
-use App\Http\Controllers\Api\EntityGraphController;
 use App\Http\Controllers\Api\AlertRecommendationController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
@@ -14,12 +14,15 @@ use App\Http\Controllers\Api\CaseRecommendationController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\ControlsController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\EntityGraphController;
 use App\Http\Controllers\Api\GnuCashController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\InvestigationController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PersonalFinanceController;
 use App\Http\Controllers\Api\ReconciliationController;
-use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\ReviewSnapshotController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TaxNoticeController;
@@ -155,6 +158,18 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     // Dashboard
     Route::prefix('dashboard')->group(function () {
         Route::get('/summary', [DashboardController::class, 'summary']);
+    });
+
+    Route::prefix('onboarding')->group(function () {
+        Route::get('/session', [OnboardingController::class, 'showSession']);
+        Route::patch('/session', [OnboardingController::class, 'updateSession']);
+        Route::get('/evidence-requirements', [OnboardingController::class, 'evidenceRequirements']);
+    });
+
+    Route::get('/action-plan', [ActionPlanController::class, 'show']);
+
+    Route::prefix('reviews')->group(function () {
+        Route::post('/first-snapshot', [ReviewSnapshotController::class, 'firstSnapshot']);
     });
 
     // AR Aging
