@@ -15,7 +15,7 @@ class Upload extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'id', 'company_id', 'uploaded_by', 'filename', 'file_size', 'status',
+        'id', 'company_id', 'business_profile_id', 'uploaded_by', 'filename', 'file_size', 'status',
         'sheets_parsed', 'row_count', 'import_type', 'original_filename',
         'storage_filename', 'claimed_content_type', 'file_extension',
         'file_size_bytes', 'sha256', 'quarantine_bucket', 'quarantine_key',

@@ -13,7 +13,7 @@ class RexPendingAction extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'session_id', 'company_id', 'action_type', 'preview', 'status', 'confirmed_by', 'confirmed_at',
+        'session_id', 'company_id', 'business_profile_id', 'action_type', 'preview', 'status', 'confirmed_by', 'confirmed_at',
     ];
 
     protected $casts = [

@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\ReconciliationDiscrepancy;
 use App\Models\Transaction;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 class ReconciliationRiskScoringService
 {
@@ -12,6 +13,13 @@ class ReconciliationRiskScoringService
      * Calculate reconciliation risk score and return structured explainable details.
      */
     public function scoreReconciliation(string $companyId): array
+    {
+        return Cache::remember("risk_score:reconciliation:{$companyId}", 300, function () use ($companyId): array {
+            return $this->computeReconciliation($companyId);
+        });
+    }
+
+    private function computeReconciliation(string $companyId): array
     {
         $ruleWeights = [
             'bank_ledger_mismatch' => 15,

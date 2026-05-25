@@ -7,10 +7,12 @@ use App\Models\Company;
 use App\Models\Transaction;
 use App\Models\Upload;
 use App\Models\User;
+use App\Services\BusinessProfileContextService;
 use App\Services\Agents\AgentActionExecutorService;
 use App\Services\Agents\AgentRiskAnalysisService;
 use App\Services\Agents\AggregateRiskSummaryService;
 use App\Services\Agents\AlertRecommendationService;
+use App\Services\Agents\BehavioralBaselineService;
 use App\Services\Agents\CaseRecommendationService;
 use App\Services\Agents\EntityRelationshipRiskScoringService;
 use App\Services\Agents\ReconciliationRiskScoringService;
@@ -19,11 +21,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Throwable;
 
 class AgentToolController extends Controller
 {
+    public function __construct(private readonly BusinessProfileContextService $businessProfileContext) {}
+
     public function companyContext(Request $request, string $companyId): JsonResponse
     {
         if (! Str::isUuid($companyId)) {
@@ -51,7 +56,7 @@ class AgentToolController extends Controller
                 'company_name' => $company->name,
                 'industry' => $company->industry,
                 'timezone' => config('app.timezone', 'UTC'),
-                'available_data_sources' => $this->availableDataSources($companyId),
+                'available_data_sources' => $this->availableDataSources($companyId, $this->businessProfileId($request)),
                 'user_role' => $user->role,
             ];
 
@@ -434,6 +439,31 @@ class AgentToolController extends Controller
         }
     }
 
+    public function behavioralBaseline(
+        Request $request,
+        string $companyId,
+        BehavioralBaselineService $behavioralBaselineService
+    ): JsonResponse {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        try {
+            if (! Company::where('id', $companyId)->exists()) {
+                return response()->json(['error' => 'Company not found'], 404);
+            }
+
+            return response()->json($behavioralBaselineService->scoreDeviation($companyId));
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'behavioral_baseline', $e);
+        }
+    }
+
     private function shouldIncludeTransactions(Request $request): bool
     {
         return filter_var($request->query('include_transactions', false), FILTER_VALIDATE_BOOLEAN);
@@ -493,6 +523,10 @@ class AgentToolController extends Controller
 
         $query = DB::table('all_transactions')
             ->where('company_id', $companyId);
+        $businessProfileId = $this->businessProfileId($request);
+        if ($businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
 
         if ($filters['date_from']) {
             $query->where('date', '>=', $filters['date_from']);
@@ -547,7 +581,13 @@ class AgentToolController extends Controller
     private function dashboardSummary(string $companyId): array
     {
         $stats = DB::table('all_transactions')
-            ->where('company_id', $companyId)
+            ->where('company_id', $companyId);
+        $businessProfileId = request()->header('X-Brevix-Business-Profile-Id');
+        if (is_string($businessProfileId) && $businessProfileId !== '' && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+            $stats->where('business_profile_id', $businessProfileId);
+        }
+
+        $stats = $stats
             ->selectRaw('COUNT(*) AS total_transactions')
             ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(vendor_customer), '')) AS vendors_monitored")
             ->selectRaw('COALESCE(SUM(ABS(amount)), 0) AS amount_reviewed')
@@ -556,6 +596,9 @@ class AgentToolController extends Controller
         $openAlerts = DB::table('alerts')
             ->where('company_id', $companyId)
             ->where('status', 'open');
+        if (is_string($businessProfileId) && $businessProfileId !== '' && Schema::hasColumn('alerts', 'business_profile_id')) {
+            $openAlerts->where('business_profile_id', $businessProfileId);
+        }
         $flaggedAlerts = (clone $openAlerts)->count();
         $criticalAlerts = (clone $openAlerts)->where('severity', 'critical')->count();
         $warningAlerts = (clone $openAlerts)->where('severity', 'warning')->count();
@@ -581,19 +624,49 @@ class AgentToolController extends Controller
             return null;
         }
 
-        return User::where('id', $userId)
-            ->where('company_id', $companyId)
-            ->first();
+        $user = User::where('id', $userId)->first();
+        if (! $user) {
+            return null;
+        }
+
+        $businessProfileId = $this->businessProfileId($request);
+        if ($businessProfileId) {
+            try {
+                $this->businessProfileContext->contextForProfile($user, $businessProfileId, $companyId);
+
+                return $user;
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        if ((string) $user->company_id === $companyId) {
+            return $user;
+        }
+
+        return $this->businessProfileContext->workspaceRole($user, $companyId) ? $user : null;
     }
 
-    private function availableDataSources(string $companyId): array
+    private function availableDataSources(string $companyId, ?string $businessProfileId = null): array
     {
         $sources = [];
-        if (Upload::where('company_id', $companyId)->exists()) {
+        $uploadQuery = Upload::where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('uploads', 'business_profile_id')) {
+            $uploadQuery->where('business_profile_id', $businessProfileId);
+        }
+
+        if ($uploadQuery->exists()) {
             $sources[] = 'file_upload';
         }
 
         return $sources;
+    }
+
+    private function businessProfileId(Request $request): ?string
+    {
+        $businessProfileId = $request->header('X-Brevix-Business-Profile-Id');
+
+        return is_string($businessProfileId) && $businessProfileId !== '' ? $businessProfileId : null;
     }
 
     private function safeToolFailure(Request $request, string $companyId, string $userId, string $toolName, Throwable $e): JsonResponse

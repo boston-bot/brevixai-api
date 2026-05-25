@@ -15,7 +15,7 @@ class ChatSession extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'company_id', 'user_id', 'title',
+        'company_id', 'business_profile_id', 'user_id', 'title',
     ];
 
     public function messages(): HasMany

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\StripeService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -61,6 +62,8 @@ class SubscriptionCheckoutTest extends TestCase
             'status' => 'active',
         ]);
 
+        $this->mockStripeCheckout('cus_test123', 'sub_test123', 'active');
+
         Sanctum::actingAs($user);
 
         $this->getJson('/api/subscriptions')
@@ -70,11 +73,7 @@ class SubscriptionCheckoutTest extends TestCase
 
         $this->postJson('/api/subscriptions/checkout', [
             'tier' => 'growth',
-            'paymentMethod' => [
-                'cardName' => 'Test User',
-                'lastFour' => '4242',
-                'expiry' => '12/30',
-            ],
+            'paymentMethodId' => 'pm_card_visa',
         ])
             ->assertOk()
             ->assertJsonPath('status', 'succeeded')
@@ -84,6 +83,8 @@ class SubscriptionCheckoutTest extends TestCase
             'company_id' => $company->id,
             'tier' => 'growth',
             'status' => 'active',
+            'stripe_customer_id' => 'cus_test123',
+            'stripe_subscription_id' => 'sub_test123',
         ]);
     }
 
@@ -91,15 +92,13 @@ class SubscriptionCheckoutTest extends TestCase
     {
         [$company, $user] = $this->createCompanyUser();
 
+        $this->mockStripeCheckout('cus_test456', 'sub_test456', 'active');
+
         Sanctum::actingAs($user);
 
         $this->postJson('/api/subscriptions/checkout', [
             'tier' => 'accounting-firm',
-            'paymentMethod' => [
-                'cardName' => 'Test User',
-                'lastFour' => '4242',
-                'expiry' => '12/30',
-            ],
+            'paymentMethodId' => 'pm_card_visa',
         ])
             ->assertOk()
             ->assertJsonPath('tier', 'risk-advisory');
@@ -118,7 +117,13 @@ class SubscriptionCheckoutTest extends TestCase
             'company_id' => $company->id,
             'tier' => 'growth',
             'status' => 'active',
+            'stripe_subscription_id' => 'sub_cancel123',
         ]);
+
+        $stripeService = $this->mock(StripeService::class);
+        $stripeService->shouldReceive('cancelSubscription')
+            ->with('sub_cancel123')
+            ->once();
 
         Sanctum::actingAs($user);
 
@@ -157,5 +162,29 @@ class SubscriptionCheckoutTest extends TestCase
         $user->save();
 
         return [$company, $user];
+    }
+
+    private function mockStripeCheckout(string $customerId, string $subscriptionId, string $status): void
+    {
+        config(['services.stripe.price_ids.growth' => 'price_growth_test']);
+        config(['services.stripe.price_ids.risk-advisory' => 'price_risk_test']);
+
+        $fakeSub = \Stripe\Subscription::constructFrom([
+            'id' => $subscriptionId,
+            'status' => $status,
+            'current_period_end' => now()->addMonth()->timestamp,
+            'latest_invoice' => null,
+        ]);
+
+        $stripeService = $this->mock(StripeService::class);
+        $stripeService->shouldReceive('createOrRetrieveCustomer')
+            ->once()
+            ->andReturn($customerId);
+        $stripeService->shouldReceive('attachPaymentMethod')
+            ->with($customerId, 'pm_card_visa')
+            ->once();
+        $stripeService->shouldReceive('createSubscription')
+            ->once()
+            ->andReturn($fakeSub);
     }
 }

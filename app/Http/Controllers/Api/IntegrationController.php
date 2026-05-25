@@ -2,18 +2,19 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\BusinessProfileAccessException;
 use App\Http\Controllers\Controller;
+use App\Services\BusinessProfileContextService;
 use App\Services\QboService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class IntegrationController extends Controller
 {
     protected QboService $qboService;
 
-    public function __construct(QboService $qboService)
+    public function __construct(QboService $qboService, private readonly BusinessProfileContextService $businessProfileContext)
     {
         $this->qboService = $qboService;
     }
@@ -23,11 +24,11 @@ class IntegrationController extends Controller
      */
     public function qboConnect(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         try {
-            $url = $this->qboService->generateAuthUri($companyId);
+            $url = $this->qboService->generateAuthUri($context->companyId, $context->businessProfileId);
             return response()->json(['url' => $url]);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], 400);
@@ -47,14 +48,16 @@ class IntegrationController extends Controller
             return response('Missing required callback parameters', 400);
         }
 
-        $companyId = $this->qboService->consumeOAuthStateNonce($stateNonce);
+        $state = $this->qboService->consumeOAuthStateNoncePayload($stateNonce);
+        $companyId = $state['company_id'];
+        $businessProfileId = $state['business_profile_id'];
 
         if (!$companyId) {
             return response('Invalid or expired OAuth state. Please try connecting again.', 403);
         }
 
         try {
-            $this->qboService->exchangeTokens($companyId, $realmId, $code, $this->qboService->redirectUri());
+            $this->qboService->exchangeTokens($companyId, $realmId, $code, $this->qboService->redirectUri(), $businessProfileId);
             
             // Redirect back to frontend
             return redirect(config('app.frontend_url', config('app.url')) . '/settings');
@@ -68,12 +71,12 @@ class IntegrationController extends Controller
      */
     public function status(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         try {
             // For now only QBO is fully supported in backend
-            $integrations = $this->qboService->getStatus($companyId);
+            $integrations = $this->qboService->getStatus($context->companyId, $context->businessProfileId);
             return response()->json(['integrations' => $integrations]);
         } catch (Exception $e) {
             return response()->json(['error' => 'Failed to fetch integrations status'], 500);
@@ -85,13 +88,14 @@ class IntegrationController extends Controller
      */
     public function qboSync(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
         $realmId = $request->input('realmId');
 
-        if (!$companyId || !$realmId) return response()->json(['error' => 'Invalid request'], 400);
+        if (!$context->companyId || !$realmId) return response()->json(['error' => 'Invalid request'], 400);
 
         try {
-            $sync = $this->qboService->sync($companyId, $realmId);
+            $sync = $this->qboService->sync($context->companyId, $realmId, $context->businessProfileId);
 
             return response()->json($sync);
         } catch (Exception $e) {
@@ -104,11 +108,11 @@ class IntegrationController extends Controller
      */
     public function qboDisconnect(Request $request, string $realmId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         try {
-            $this->qboService->disconnect($companyId, $realmId);
+            $this->qboService->disconnect($context->companyId, $realmId, $context->businessProfileId);
             return response()->json(['message' => "QuickBooks company {$realmId} disconnected successfully"]);
         } catch (Exception $e) {
             return response()->json(['error' => 'Failed to disconnect'], 500);
@@ -120,11 +124,11 @@ class IntegrationController extends Controller
      */
     public function qboPurge(Request $request, string $realmId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         try {
-            $this->qboService->purge($companyId, $realmId);
+            $this->qboService->purge($context->companyId, $realmId, $context->businessProfileId);
             return response()->json(['message' => "Data for company {$realmId} has been purged."]);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
@@ -136,8 +140,8 @@ class IntegrationController extends Controller
      */
     public function qboSaveCredentials(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         $request->validate([
             'clientId' => 'required|string',
@@ -146,7 +150,7 @@ class IntegrationController extends Controller
         ]);
 
         try {
-            $this->qboService->saveCredentials($companyId, $request->all());
+            $this->qboService->saveCredentials($context->companyId, $request->all(), $context->businessProfileId);
             return response()->json(['message' => 'QuickBooks credentials saved successfully']);
         } catch (Exception $e) {
             return response()->json(['error' => 'Failed to save credentials'], 500);
@@ -158,14 +162,23 @@ class IntegrationController extends Controller
      */
     public function qboRemoveCredentials(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         try {
-            $this->qboService->removeCredentials($companyId);
+            $this->qboService->removeCredentials($context->companyId, $context->businessProfileId);
             return response()->json(['message' => 'QuickBooks credentials removed successfully']);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 500);
+        }
+    }
+
+    private function resolveContext(Request $request): \App\Services\BusinessProfileContext|JsonResponse
+    {
+        try {
+            return $this->businessProfileContext->resolveForRequest($request);
+        } catch (BusinessProfileAccessException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->statusCode());
         }
     }
 }

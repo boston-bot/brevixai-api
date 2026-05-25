@@ -31,6 +31,7 @@ class AgentToolRegistry
             'dashboard_health'         => 'company/{companyId}/dashboard',
             'transaction_detail'       => 'company/{companyId}/transaction-detail',
             'pending_recommendations'  => 'company/{companyId}/pending-recommendations',
+            'behavioral_baseline'      => 'company/{companyId}/behavioral-baseline',
             'process_registry'         => 'process-registry',
         ];
     }

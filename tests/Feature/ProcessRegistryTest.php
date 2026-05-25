@@ -98,9 +98,9 @@ class ProcessRegistryTest extends TestCase
         }
     }
 
-    public function test_investigation_synthesis_is_preview(): void
+    public function test_investigation_synthesis_is_available(): void
     {
-        $this->assertSame(ProcessReadiness::Preview, RexProcess::InvestigationSynthesis->readiness());
+        $this->assertSame(ProcessReadiness::Available, RexProcess::InvestigationSynthesis->readiness());
         $this->assertSame('agent', RexProcess::InvestigationSynthesis->mode());
     }
 
@@ -129,7 +129,8 @@ class ProcessRegistryTest extends TestCase
         foreach ($available as $p) {
             $this->assertSame(ProcessReadiness::Available, $p->readiness());
         }
-        $this->assertNotContains(RexProcess::InvestigationSynthesis, $available);
+        // InvestigationSynthesis is now Available (promoted from Preview)
+        $this->assertContains(RexProcess::InvestigationSynthesis, $available);
         $this->assertNotContains(RexProcess::Reporting, $available);
     }
 
@@ -142,7 +143,8 @@ class ProcessRegistryTest extends TestCase
         }
         $this->assertContains(RexProcess::RiskReview, $routable);
         $this->assertContains(RexProcess::RecommendationReview, $routable);
-        $this->assertNotContains(RexProcess::InvestigationSynthesis, $routable);
+        // InvestigationSynthesis is now Available and agent-mode — it is routable
+        $this->assertContains(RexProcess::InvestigationSynthesis, $routable);
         $this->assertNotContains(RexProcess::TransactionLookup, $routable);
     }
 }

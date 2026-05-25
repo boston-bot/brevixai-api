@@ -16,6 +16,7 @@ class AgentRun extends Model
 
     protected $fillable = [
         'company_id',
+        'business_profile_id',
         'user_id',
         'conversation_id',
         'status',

@@ -16,6 +16,7 @@ class AgentActionApproval extends Model
     protected $fillable = [
         'agent_run_id',
         'company_id',
+        'business_profile_id',
         'user_id',
         'action_type',
         'action_payload',

@@ -8,24 +8,17 @@ use App\Models\ChatUsageDaily;
 use App\Models\RexPendingAction;
 use App\Models\AuditCase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use Exception;
 
 class ChatService
 {
-    private const DAILY_QUOTA = [
-        'starter' => 0,
-        'growth' => 50,
-        'risk-advisory' => 200,
-        'accounting' => 200,
-        'accounting-firm' => 200,
-    ];
+    public function __construct(private readonly PlanPolicyService $planPolicy) {}
 
-    public function checkAndIncrementQuota(string $companyId): array
+    public function checkAndIncrementQuota(string $companyId, ?string $businessProfileId = null): array
     {
-        $sub = DB::table('subscriptions')->where('company_id', $companyId)->where('status', 'active')->first();
-        $tier = $sub ? $sub->tier : 'starter';
-        $limit = self::DAILY_QUOTA[$tier] ?? 0;
+        $limit = $this->planPolicy->dailyChatLimit($companyId);
 
         if ($limit === 0) {
             throw new Exception("Rex is not available on your current plan", 403);
@@ -33,10 +26,12 @@ class ChatService
 
         $today = Carbon::today()->toDateString();
 
-        $usage = ChatUsageDaily::firstOrCreate(
-            ['company_id' => $companyId, 'date' => $today],
-            ['message_count' => 0]
-        );
+        $keys = ['company_id' => $companyId, 'date' => $today];
+        if ($businessProfileId && Schema::hasColumn('chat_usage_daily', 'business_profile_id')) {
+            $keys['business_profile_id'] = $businessProfileId;
+        }
+
+        $usage = ChatUsageDaily::firstOrCreate($keys, ['message_count' => 0]);
 
         if ($usage->message_count >= $limit) {
             throw new Exception("Daily message limit of {$limit} reached. Resets at midnight.", 429);
@@ -51,14 +46,16 @@ class ChatService
         ];
     }
 
-    public function getUsage(string $companyId): array
+    public function getUsage(string $companyId, ?string $businessProfileId = null): array
     {
-        $sub = DB::table('subscriptions')->where('company_id', $companyId)->where('status', 'active')->first();
-        $tier = $sub ? $sub->tier : 'starter';
-        $limit = self::DAILY_QUOTA[$tier] ?? 0;
+        $limit = $this->planPolicy->dailyChatLimit($companyId);
 
         $today = Carbon::today()->toDateString();
-        $usage = ChatUsageDaily::where('company_id', $companyId)->where('date', $today)->first();
+        $usageQuery = ChatUsageDaily::where('company_id', $companyId)->where('date', $today);
+        if ($businessProfileId && Schema::hasColumn('chat_usage_daily', 'business_profile_id')) {
+            $usageQuery->where('business_profile_id', $businessProfileId);
+        }
+        $usage = $usageQuery->first();
         $used = $usage ? $usage->message_count : 0;
 
         return [
@@ -68,20 +65,31 @@ class ChatService
         ];
     }
 
-    public function createSession(string $companyId, string $userId, ?string $title): ChatSession
+    public function createSession(string $companyId, string $userId, ?string $title, ?string $businessProfileId = null): ChatSession
     {
-        return ChatSession::create([
+        $attributes = [
             'company_id' => $companyId,
             'user_id' => $userId,
             'title' => $title ?: 'New Chat with Rex',
-        ]);
+        ];
+
+        if ($businessProfileId && Schema::hasColumn('chat_sessions', 'business_profile_id')) {
+            $attributes['business_profile_id'] = $businessProfileId;
+        }
+
+        return ChatSession::create($attributes);
     }
 
-    public function listSessions(string $companyId): array
+    public function listSessions(string $companyId, ?string $businessProfileId = null): array
     {
         $sessions = DB::table('chat_sessions as cs')
-            ->where('cs.company_id', $companyId)
-            ->orderBy('cs.updated_at', 'desc')
+            ->where('cs.company_id', $companyId);
+
+        if ($businessProfileId && Schema::hasColumn('chat_sessions', 'business_profile_id')) {
+            $sessions->where('cs.business_profile_id', $businessProfileId);
+        }
+
+        $sessions = $sessions->orderBy('cs.updated_at', 'desc')
             ->limit(20)
             ->select(
                 'cs.id', 'cs.title', 'cs.created_at', 'cs.updated_at',
@@ -92,9 +100,13 @@ class ChatService
         return $sessions->toArray();
     }
 
-    public function getSession(string $companyId, string $sessionId): ?array
+    public function getSession(string $companyId, string $sessionId, ?string $businessProfileId = null): ?array
     {
-        $session = ChatSession::where('id', $sessionId)->where('company_id', $companyId)->first();
+        $query = ChatSession::where('id', $sessionId)->where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('chat_sessions', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+        $session = $query->first();
         if (!$session) return null;
 
         $messages = ChatMessage::where('session_id', $sessionId)->orderBy('created_at', 'asc')->get();
@@ -104,47 +116,67 @@ class ChatService
         return $sessionArray;
     }
 
-    public function deleteSession(string $companyId, string $sessionId): bool
+    public function deleteSession(string $companyId, string $sessionId, ?string $businessProfileId = null): bool
     {
-        $session = ChatSession::where('id', $sessionId)->where('company_id', $companyId)->first();
+        $query = ChatSession::where('id', $sessionId)->where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('chat_sessions', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+        $session = $query->first();
         if (!$session) return false;
 
         $session->delete();
         return true;
     }
 
-    public function logUserMessage(string $companyId, string $sessionId, string $content): void
+    public function logUserMessage(string $companyId, string $sessionId, string $content, ?string $businessProfileId = null): void
     {
-        ChatMessage::create([
+        $attributes = [
             'session_id' => $sessionId,
             'company_id' => $companyId,
             'role' => 'user',
             'content' => $content,
-        ]);
+        ];
+
+        if ($businessProfileId && Schema::hasColumn('chat_messages', 'business_profile_id')) {
+            $attributes['business_profile_id'] = $businessProfileId;
+        }
+
+        ChatMessage::create($attributes);
 
         ChatSession::where('id', $sessionId)->update(['updated_at' => now()]);
     }
 
-    public function logAssistantMessage(string $companyId, string $sessionId, string $content, ?array $structuredPayload): void
+    public function logAssistantMessage(string $companyId, string $sessionId, string $content, ?array $structuredPayload, ?string $businessProfileId = null): void
     {
-        ChatMessage::create([
+        $attributes = [
             'session_id' => $sessionId,
             'company_id' => $companyId,
             'role' => 'assistant',
             'content' => $content,
             'structured_payload' => $structuredPayload,
-        ]);
+        ];
+
+        if ($businessProfileId && Schema::hasColumn('chat_messages', 'business_profile_id')) {
+            $attributes['business_profile_id'] = $businessProfileId;
+        }
+
+        ChatMessage::create($attributes);
 
         ChatSession::where('id', $sessionId)->update(['updated_at' => now()]);
     }
 
-    public function getWorkspace(string $companyId, string $sessionId): array
+    public function getWorkspace(string $companyId, string $sessionId, ?string $businessProfileId = null): array
     {
         $messages = ChatMessage::where('session_id', $sessionId)
             ->where('company_id', $companyId)
-            ->where('role', 'assistant')
-            ->orderBy('created_at')
-            ->get();
+            ->where('role', 'assistant');
+
+        if ($businessProfileId && Schema::hasColumn('chat_messages', 'business_profile_id')) {
+            $messages->where('business_profile_id', $businessProfileId);
+        }
+
+        $messages = $messages->orderBy('created_at')->get();
 
         $artifacts = [];
         foreach ($messages as $message) {
@@ -156,8 +188,13 @@ class ChatService
 
         $actions = RexPendingAction::where('session_id', $sessionId)
             ->where('company_id', $companyId)
-            ->where('status', 'pending')
-            ->get();
+            ->where('status', 'pending');
+
+        if ($businessProfileId && Schema::hasColumn('rex_pending_actions', 'business_profile_id')) {
+            $actions->where('business_profile_id', $businessProfileId);
+        }
+
+        $actions = $actions->get();
 
         return [
             'artifacts' => array_values($artifacts),
@@ -165,13 +202,18 @@ class ChatService
         ];
     }
 
-    public function confirmAction(string $companyId, string $userId, string $sessionId, string $actionId): array
+    public function confirmAction(string $companyId, string $userId, string $sessionId, string $actionId, ?string $businessProfileId = null): array
     {
         $action = RexPendingAction::where('id', $actionId)
             ->where('session_id', $sessionId)
             ->where('company_id', $companyId)
-            ->where('status', 'pending')
-            ->first();
+            ->where('status', 'pending');
+
+        if ($businessProfileId && Schema::hasColumn('rex_pending_actions', 'business_profile_id')) {
+            $action->where('business_profile_id', $businessProfileId);
+        }
+
+        $action = $action->first();
 
         if (!$action) {
             throw new Exception("Action not found or already resolved", 404);
@@ -210,13 +252,18 @@ class ChatService
         return ['success' => true, 'actionId' => $actionId, 'result' => $executionResult];
     }
 
-    public function rejectAction(string $companyId, string $userId, string $sessionId, string $actionId): array
+    public function rejectAction(string $companyId, string $userId, string $sessionId, string $actionId, ?string $businessProfileId = null): array
     {
         $action = RexPendingAction::where('id', $actionId)
             ->where('session_id', $sessionId)
             ->where('company_id', $companyId)
-            ->where('status', 'pending')
-            ->first();
+            ->where('status', 'pending');
+
+        if ($businessProfileId && Schema::hasColumn('rex_pending_actions', 'business_profile_id')) {
+            $action->where('business_profile_id', $businessProfileId);
+        }
+
+        $action = $action->first();
 
         if (!$action) {
             throw new Exception("Action not found or already resolved", 404);
