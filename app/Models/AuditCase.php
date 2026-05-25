@@ -34,7 +34,7 @@ class AuditCase extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'company_id', 'case_recommendation_id', 'title', 'description', 'status', 'severity',
+        'company_id', 'business_profile_id', 'case_recommendation_id', 'title', 'description', 'status', 'severity',
         'assigned_to', 'created_by', 'resolution_notes', 'resolved_at',
         'investigation_status', 'investigation_assigned_user_id', 'investigation_priority',
         'investigation_summary', 'investigation_notes', 'last_activity_at', 'investigation_metadata',

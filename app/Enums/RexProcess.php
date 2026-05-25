@@ -14,19 +14,25 @@ enum RexProcess: string
     case Reporting              = 'reporting';
     case RecommendationReview   = 'recommendation_review';
     case InvestigationSynthesis = 'investigation_synthesis';
+    case BehavioralAnalysis     = 'behavioral_analysis';
+    case TaxNoticeReview        = 'tax_notice_review';
 
     /** Routing mode: 'agent' calls BrevixAgentRunner; 'orchestrator' calls RexOrchestratorService. */
     public function mode(): string
     {
         return match ($this) {
-            self::RiskReview, self::RecommendationReview, self::InvestigationSynthesis => 'agent',
+            self::RiskReview,
+            self::RecommendationReview,
+            self::InvestigationSynthesis,
+            self::BehavioralAnalysis => 'agent',
             self::TransactionLookup,
             self::DashboardHealth,
             self::ControlsReview,
             self::ReconciliationReview,
             self::EntityGraphReview,
             self::CaseManagement,
-            self::Reporting => 'orchestrator',
+            self::Reporting,
+            self::TaxNoticeReview => 'orchestrator',
         };
     }
 
@@ -60,13 +66,19 @@ enum RexProcess: string
                 'entity_relationship_risk',
                 'alert_recommendations',
             ],
+            self::BehavioralAnalysis => [
+                'company_context',
+                'behavioral_baseline',
+                'risk_summary',
+            ],
             self::TransactionLookup,
             self::DashboardHealth,
             self::ControlsReview,
             self::ReconciliationReview,
             self::EntityGraphReview,
             self::CaseManagement,
-            self::Reporting => [],
+            self::Reporting,
+            self::TaxNoticeReview => [],
         };
     }
 
@@ -81,7 +93,10 @@ enum RexProcess: string
             self::EntityGraphReview,
             self::CaseManagement,
             self::RecommendationReview => ProcessReadiness::Available,
-            self::Reporting, self::InvestigationSynthesis => ProcessReadiness::Preview,
+            self::Reporting,
+            self::BehavioralAnalysis,
+            self::TaxNoticeReview => ProcessReadiness::Preview,
+            self::InvestigationSynthesis => ProcessReadiness::Available,
         };
     }
 
@@ -93,14 +108,18 @@ enum RexProcess: string
     public function approvalTypes(): array
     {
         return match ($this) {
-            self::RiskReview, self::RecommendationReview, self::InvestigationSynthesis => ['create_alert'],
+            self::RiskReview         => ['create_alert', 'create_case', 'flag_transaction'],
+            self::RecommendationReview => ['create_alert', 'create_case'],
+            self::InvestigationSynthesis => ['create_alert', 'create_case', 'escalate_review'],
+            self::BehavioralAnalysis => ['create_alert', 'flag_transaction'],
             self::TransactionLookup,
             self::DashboardHealth,
             self::ControlsReview,
             self::ReconciliationReview,
             self::EntityGraphReview,
             self::CaseManagement,
-            self::Reporting => [],
+            self::Reporting,
+            self::TaxNoticeReview => [],
         };
     }
 

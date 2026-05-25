@@ -24,6 +24,16 @@ class Company extends Model
         return $this->hasMany(User::class);
     }
 
+    public function businessProfiles(): HasMany
+    {
+        return $this->hasMany(BusinessProfile::class);
+    }
+
+    public function workspaceMemberships(): HasMany
+    {
+        return $this->hasMany(WorkspaceMembership::class);
+    }
+
     public function subscription(): HasOne
     {
         return $this->hasOne(Subscription::class);

@@ -15,7 +15,7 @@ class Alert extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'company_id', 'group_id', 'alert_recommendation_id', 'rule_key', 'severity', 'title',
+        'company_id', 'business_profile_id', 'group_id', 'alert_recommendation_id', 'rule_key', 'severity', 'title',
         'detail', 'evidence', 'reason_codes', 'source_system', 'source_recommendation_id',
         'confidence_score', 'evidence_refs', 'comparison_window', 'status', 'priority_score',
         'reviewed_by', 'reviewed_at',

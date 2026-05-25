@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\Alert;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 
 class EntityRelationshipRiskScoringService
 {
@@ -12,6 +13,13 @@ class EntityRelationshipRiskScoringService
      * Calculate entity relationship risk score and return structured explainable details.
      */
     public function scoreEntityRelationships(string $companyId): array
+    {
+        return Cache::remember("risk_score:entity_relationship:{$companyId}", 300, function () use ($companyId): array {
+            return $this->computeEntityRelationships($companyId);
+        });
+    }
+
+    private function computeEntityRelationships(string $companyId): array
     {
         $ruleWeights = [
             'employee_vendor_overlap' => 20,

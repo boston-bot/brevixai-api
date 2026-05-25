@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use Exception;
@@ -29,29 +30,61 @@ class QboService
         'JournalEntry',
     ];
 
-    public function createOAuthStateNonce(string $companyId): string
+    public function createOAuthStateNonce(string $companyId, ?string $businessProfileId = null): string
     {
         $nonce = bin2hex(random_bytes(32));
-        Cache::put(self::OAUTH_STATE_PREFIX . $nonce, $companyId, self::OAUTH_STATE_TTL_SECONDS);
+        Cache::put(self::OAUTH_STATE_PREFIX . $nonce, [
+            'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
+        ], self::OAUTH_STATE_TTL_SECONDS);
         return $nonce;
     }
 
     public function consumeOAuthStateNonce(string $nonce): ?string
     {
-        $key = self::OAUTH_STATE_PREFIX . $nonce;
-        $companyId = Cache::get($key);
-        if ($companyId) {
-            Cache::forget($key);
-        }
-        return $companyId;
+        return $this->consumeOAuthStateNoncePayload($nonce)['company_id'] ?? null;
     }
 
-    public function getCredentials(string $companyId): array
+    /** @return array{company_id: string|null, business_profile_id: string|null} */
+    public function consumeOAuthStateNoncePayload(string $nonce): array
     {
-        $row = DB::table('integrations')
+        $key = self::OAUTH_STATE_PREFIX . $nonce;
+        $payload = Cache::get($key);
+        if ($payload) {
+            Cache::forget($key);
+        }
+
+        if (is_string($payload)) {
+            return ['company_id' => $payload, 'business_profile_id' => null];
+        }
+
+        if (is_array($payload)) {
+            return [
+                'company_id' => is_string($payload['company_id'] ?? null) ? $payload['company_id'] : null,
+                'business_profile_id' => is_string($payload['business_profile_id'] ?? null) ? $payload['business_profile_id'] : null,
+            ];
+        }
+
+        return ['company_id' => null, 'business_profile_id' => null];
+    }
+
+    public function getCredentials(string $companyId, ?string $businessProfileId = null): array
+    {
+        $row = null;
+        if ($businessProfileId && $this->hasBusinessProfileColumn('integrations')) {
+            $row = DB::table('integrations')
+                ->where('company_id', $companyId)
+                ->where('business_profile_id', $businessProfileId)
+                ->where('provider', 'quickbooks')
+                ->whereNull('realm_id')
+                ->first();
+        }
+
+        $row ??= DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
             ->whereNull('realm_id')
+            ->when($this->hasBusinessProfileColumn('integrations'), fn ($query) => $query->whereNull('business_profile_id'))
             ->first();
 
         if (! $row || ! $row->client_id_enc || ! $row->client_secret_enc) {
@@ -73,10 +106,10 @@ class QboService
         return [$clientId, $clientSecret, $env];
     }
 
-    public function generateAuthUri(string $companyId): string
+    public function generateAuthUri(string $companyId, ?string $businessProfileId = null): string
     {
-        [$clientId, $clientSecret, $env] = $this->getCredentials($companyId);
-        $stateNonce = $this->createOAuthStateNonce($companyId);
+        [$clientId, $clientSecret, $env] = $this->getCredentials($companyId, $businessProfileId);
+        $stateNonce = $this->createOAuthStateNonce($companyId, $businessProfileId);
 
         $baseUrl = $env === 'sandbox' 
             ? 'https://appcenter.intuit.com/connect/oauth2' 
@@ -98,9 +131,9 @@ class QboService
         return (string) config('services.quickbooks.redirect_uri');
     }
 
-    public function exchangeTokens(string $companyId, string $realmId, string $code, string $redirectUri): void
+    public function exchangeTokens(string $companyId, string $realmId, string $code, string $redirectUri, ?string $businessProfileId = null): void
     {
-        [$clientId, $clientSecret, $env] = $this->getCredentials($companyId);
+        [$clientId, $clientSecret, $env] = $this->getCredentials($companyId, $businessProfileId);
 
         $tokenEndpoint = $env === 'sandbox'
             ? 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
@@ -127,62 +160,80 @@ class QboService
         $refreshEnc = encrypt($tokens['refresh_token']);
         $expiresAt = now()->addSeconds($tokens['expires_in'])->subMinutes(5);
 
-        DB::table('integrations')->updateOrInsert(
-            ['company_id' => $companyId, 'provider' => 'quickbooks', 'realm_id' => $realmId],
-            [
-                'access_token_enc' => $accessEnc,
-                'refresh_token_enc' => $refreshEnc,
-                'token_expires_at' => $expiresAt,
-                'environment' => $env,
-                'sync_status' => 'idle',
-                'sync_progress' => 0,
-                'sync_error' => null,
-                'updated_at' => now(),
-            ]
-        );
+        $keys = ['company_id' => $companyId, 'provider' => 'quickbooks', 'realm_id' => $realmId];
+        $values = [
+            'access_token_enc' => $accessEnc,
+            'refresh_token_enc' => $refreshEnc,
+            'token_expires_at' => $expiresAt,
+            'environment' => $env,
+            'sync_status' => 'idle',
+            'sync_progress' => 0,
+            'sync_error' => null,
+            'updated_at' => now(),
+        ];
+
+        if ($this->hasBusinessProfileColumn('integrations')) {
+            $keys['business_profile_id'] = $businessProfileId;
+            $values['business_profile_id'] = $businessProfileId;
+        }
+
+        DB::table('integrations')->updateOrInsert($keys, $values);
     }
 
-    public function getStatus(string $companyId): array
+    public function getStatus(string $companyId, ?string $businessProfileId = null): array
     {
-        $this->markStaleSyncsFailed($companyId);
+        $this->markStaleSyncsFailed($companyId, $businessProfileId);
 
-        $rows = DB::select("
-            SELECT i.provider, i.realm_id, i.updated_at, 
-                   (i.access_token_enc IS NOT NULL) as is_connected,
-                   (m.client_id_enc IS NOT NULL) as has_master_credentials,
-                   COALESCE(i.environment, m.environment) as environment,
-                   COALESCE(i.client_id_enc, m.client_id_enc) as client_id_enc,
-                   i.sync_status, i.sync_progress, i.sync_error
-            FROM integrations i
-            LEFT JOIN integrations m ON m.company_id = i.company_id 
-               AND m.provider = 'quickbooks' AND m.realm_id IS NULL
-            WHERE i.company_id = ? AND i.provider = 'quickbooks' AND i.realm_id IS NOT NULL
-        ", [$companyId]);
+        $master = DB::table('integrations')
+            ->where('company_id', $companyId)
+            ->where('provider', 'quickbooks')
+            ->whereNull('realm_id')
+            ->when($businessProfileId && $this->hasBusinessProfileColumn('integrations'), fn ($query) => $query->where('business_profile_id', $businessProfileId))
+            ->first();
+        if (! $master && $businessProfileId && $this->hasBusinessProfileColumn('integrations')) {
+            $master = DB::table('integrations')
+                ->where('company_id', $companyId)
+                ->where('provider', 'quickbooks')
+                ->whereNull('realm_id')
+                ->whereNull('business_profile_id')
+                ->first();
+        }
 
-        $orphanedRows = DB::select("
-            SELECT DISTINCT realm_id 
-            FROM qbo_transactions 
-            WHERE company_id = ? 
-            AND (
-               realm_id IS NULL OR 
-               realm_id NOT IN (
-                   SELECT realm_id FROM integrations 
-                   WHERE company_id = ? AND provider = 'quickbooks' AND realm_id IS NOT NULL
-               )
-            )
-        ", [$companyId, $companyId]);
+        $rowsQuery = DB::table('integrations')
+            ->where('company_id', $companyId)
+            ->where('provider', 'quickbooks')
+            ->whereNotNull('realm_id');
+        $this->scopeBusinessProfile($rowsQuery, 'integrations', $businessProfileId);
+        $rows = $rowsQuery->get();
+
+        $connectedRealmIds = $rows->pluck('realm_id')->filter()->values()->all();
+        $orphanQuery = DB::table('qbo_transactions')
+            ->select('realm_id')
+            ->distinct()
+            ->where('company_id', $companyId);
+        $this->scopeBusinessProfile($orphanQuery, 'qbo_transactions', $businessProfileId);
+        $orphanedRows = $orphanQuery
+            ->where(function ($query) use ($connectedRealmIds): void {
+                $query->whereNull('realm_id');
+                if (count($connectedRealmIds) > 0) {
+                    $query->orWhereNotIn('realm_id', $connectedRealmIds);
+                } else {
+                    $query->orWhereNotNull('realm_id');
+                }
+            })
+            ->get();
 
         $integrations = [];
         foreach ($rows as $row) {
-            $hasCredentials = $row->has_master_credentials || (bool)$row->client_id_enc;
+            $hasCredentials = (bool) ($master?->client_id_enc) || (bool) ($row->client_id_enc ?? null);
             
             $integrations[] = [
                 'provider' => $row->provider,
                 'realm_id' => $row->realm_id,
                 'updated_at' => $row->updated_at,
-                'is_connected' => (bool)$row->is_connected,
+                'is_connected' => (bool) ($row->access_token_enc ?? null),
                 'has_credentials' => $hasCredentials,
-                'environment' => $row->environment,
+                'environment' => $row->environment ?: $master?->environment,
                 'sync_status' => $row->sync_status ?: 'idle',
                 'sync_progress' => $row->sync_progress ?: 0,
                 'sync_error' => $row->sync_error,
@@ -211,13 +262,14 @@ class QboService
         return $integrations;
     }
 
-    public function sync(string $companyId, string $realmId): array
+    public function sync(string $companyId, string $realmId, ?string $businessProfileId = null): array
     {
-        $integration = DB::table('integrations')
+        $integrationQuery = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->where('realm_id', $realmId)
-            ->first();
+            ->where('realm_id', $realmId);
+        $this->scopeBusinessProfile($integrationQuery, 'integrations', $businessProfileId);
+        $integration = $integrationQuery->first();
 
         if (!$integration || !$integration->access_token_enc) {
             throw new Exception('Cannot sync a disconnected company.', 400);
@@ -227,11 +279,12 @@ class QboService
             throw new Exception('A synchronization is already in progress.', 409);
         }
 
-        DB::table('integrations')
+        $syncQuery = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->where('realm_id', $realmId)
-            ->update([
+            ->where('realm_id', $realmId);
+        $this->scopeBusinessProfile($syncQuery, 'integrations', $businessProfileId);
+        $syncQuery->update([
                 'sync_status' => 'syncing',
                 'sync_progress' => 50,
                 'sync_error' => null,
@@ -239,7 +292,7 @@ class QboService
             ]);
 
         try {
-            $integration = $this->refreshAccessTokenIfNeeded($companyId, $realmId, $integration);
+            $integration = $this->refreshAccessTokenIfNeeded($companyId, $realmId, $integration, $businessProfileId);
             $accessToken = decrypt($integration->access_token_enc);
             $environment = $integration->environment ?: env('QB_ENVIRONMENT', 'sandbox');
             $importedCount = 0;
@@ -248,11 +301,11 @@ class QboService
                 $records = $this->fetchAllEntityRecords($realmId, $entity, $accessToken, $environment);
 
                 foreach ($records as $record) {
-                    $mapped = $this->mapQboRecord($companyId, $realmId, $entity, $record);
+                    $mapped = $this->mapQboRecord($companyId, $realmId, $entity, $record, $businessProfileId);
                     if ($mapped) {
                         $this->upsertQboTransaction($mapped);
                         if ($entity === 'Invoice') {
-                            $this->upsertQboInvoice($companyId, $realmId, $record);
+                            $this->upsertQboInvoice($companyId, $realmId, $record, $businessProfileId);
                         }
                         $importedCount++;
                     }
@@ -262,11 +315,14 @@ class QboService
                     $companyId,
                     $realmId,
                     'syncing',
-                    (int) floor((($index + 1) / count(self::QBO_ENTITIES)) * 95)
+                    (int) floor((($index + 1) / count(self::QBO_ENTITIES)) * 95),
+                    null,
+                    $businessProfileId
                 );
             }
 
-            $this->updateSyncState($companyId, $realmId, 'idle', 100);
+            $this->updateSyncState($companyId, $realmId, 'idle', 100, null, $businessProfileId);
+            $this->flushRiskScoreCache($companyId);
 
             return [
                 'message' => 'QuickBooks sync completed',
@@ -275,12 +331,12 @@ class QboService
                 'imported_count' => $importedCount,
             ];
         } catch (\Throwable $e) {
-            $this->updateSyncState($companyId, $realmId, 'failed', 0, $e->getMessage());
+            $this->updateSyncState($companyId, $realmId, 'failed', 0, $e->getMessage(), $businessProfileId);
             throw new Exception('QuickBooks sync failed: ' . $e->getMessage(), 502);
         }
     }
 
-    private function refreshAccessTokenIfNeeded(string $companyId, string $realmId, object $integration): object
+    private function refreshAccessTokenIfNeeded(string $companyId, string $realmId, object $integration, ?string $businessProfileId = null): object
     {
         if (!$integration->token_expires_at || Carbon::parse($integration->token_expires_at)->greaterThan(now()->addMinute())) {
             return $integration;
@@ -290,7 +346,7 @@ class QboService
             throw new Exception('QuickBooks refresh token is missing.');
         }
 
-        [$clientId, $clientSecret] = $this->getCredentials($companyId);
+        [$clientId, $clientSecret] = $this->getCredentials($companyId, $businessProfileId);
         $authHeader = base64_encode("{$clientId}:{$clientSecret}");
 
         $response = Http::withHeaders([
@@ -307,22 +363,25 @@ class QboService
 
         $tokens = $response->json();
 
-        DB::table('integrations')
+        $updateQuery = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->where('realm_id', $realmId)
-            ->update([
+            ->where('realm_id', $realmId);
+        $this->scopeBusinessProfile($updateQuery, 'integrations', $businessProfileId);
+        $updateQuery->update([
                 'access_token_enc' => encrypt($tokens['access_token']),
                 'refresh_token_enc' => encrypt($tokens['refresh_token'] ?? decrypt($integration->refresh_token_enc)),
                 'token_expires_at' => now()->addSeconds($tokens['expires_in'])->subMinutes(5),
                 'updated_at' => now(),
             ]);
 
-        return DB::table('integrations')
+        $query = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->where('realm_id', $realmId)
-            ->first();
+            ->where('realm_id', $realmId);
+        $this->scopeBusinessProfile($query, 'integrations', $businessProfileId);
+
+        return $query->first();
     }
 
     private function fetchAllEntityRecords(string $realmId, string $entity, string $accessToken, string $environment): array
@@ -372,7 +431,7 @@ class QboService
             : (string) config('services.quickbooks.sandbox_base_url');
     }
 
-    private function mapQboRecord(string $companyId, string $realmId, string $entity, array $record): ?array
+    private function mapQboRecord(string $companyId, string $realmId, string $entity, array $record, ?string $businessProfileId = null): ?array
     {
         $qboId = $record['Id'] ?? null;
         if (!$qboId) {
@@ -382,7 +441,7 @@ class QboService
         $transactionDate = $record['TxnDate'] ?? $record['MetaData']['CreateTime'] ?? null;
         $amount = $this->extractAmount($entity, $record);
 
-        return [
+        $mapped = [
             'id' => (string) Str::uuid(),
             'company_id' => $companyId,
             'qbo_id' => "{$entity}:{$qboId}",
@@ -395,6 +454,12 @@ class QboService
             'raw_payload' => json_encode(['entity' => $entity, 'record' => $record]),
             'synced_at' => now(),
         ];
+
+        if ($businessProfileId && $this->hasBusinessProfileColumn('qbo_transactions')) {
+            $mapped['business_profile_id'] = $businessProfileId;
+        }
+
+        return $mapped;
     }
 
     private function extractAmount(string $entity, array $record): float
@@ -440,14 +505,21 @@ class QboService
 
     private function upsertQboTransaction(array $transaction): void
     {
-        DB::table('qbo_transactions')->updateOrInsert(
-            [
-                'company_id' => $transaction['company_id'],
-                'realm_id' => $transaction['realm_id'],
-                'qbo_id' => $transaction['qbo_id'],
-            ],
-            $transaction
-        );
+        if (! $this->hasBusinessProfileColumn('qbo_transactions')) {
+            unset($transaction['business_profile_id']);
+        }
+
+        $keys = [
+            'company_id' => $transaction['company_id'],
+            'realm_id' => $transaction['realm_id'],
+            'qbo_id' => $transaction['qbo_id'],
+        ];
+
+        if ($this->hasBusinessProfileColumn('qbo_transactions') && array_key_exists('business_profile_id', $transaction)) {
+            $keys['business_profile_id'] = $transaction['business_profile_id'];
+        }
+
+        DB::table('qbo_transactions')->updateOrInsert($keys, $transaction);
     }
 
     public function backfillInvoicesFromStoredTransactions(string $companyId, ?string $realmId = null): int
@@ -468,14 +540,19 @@ class QboService
                 continue;
             }
 
-            $this->upsertQboInvoice($companyId, (string) $row->realm_id, $record);
+            $this->upsertQboInvoice(
+                $companyId,
+                (string) $row->realm_id,
+                $record,
+                property_exists($row, 'business_profile_id') ? $row->business_profile_id : null
+            );
             $count++;
         }
 
         return $count;
     }
 
-    private function upsertQboInvoice(string $companyId, string $realmId, array $record): void
+    private function upsertQboInvoice(string $companyId, string $realmId, array $record, ?string $businessProfileId = null): void
     {
         $qboId = $record['Id'] ?? null;
         if (!$qboId) {
@@ -488,12 +565,11 @@ class QboService
         $invoiceDate = Carbon::parse($record['TxnDate'] ?? $record['MetaData']['CreateTime'] ?? now())->toDateString();
         $dueDate = Carbon::parse($record['DueDate'] ?? $invoiceDate)->toDateString();
 
-        DB::table('invoices')->updateOrInsert(
-            [
+        $keys = [
                 'company_id' => $companyId,
                 'row_content_hash' => "qbo:{$realmId}:invoice:{$qboId}",
-            ],
-            [
+        ];
+        $values = [
                 'upload_id' => null,
                 'customer_name' => $record['CustomerRef']['name'] ?? 'Unknown Customer',
                 'invoice_number' => $record['DocNumber'] ?? $qboId,
@@ -508,8 +584,14 @@ class QboService
                 'source_row_number' => null,
                 'updated_at' => now(),
                 'created_at' => now(),
-            ]
-        );
+        ];
+
+        if ($businessProfileId && $this->hasBusinessProfileColumn('invoices')) {
+            $keys['business_profile_id'] = $businessProfileId;
+            $values['business_profile_id'] = $businessProfileId;
+        }
+
+        DB::table('invoices')->updateOrInsert($keys, $values);
     }
 
     private function mapInvoiceStatus(float $amount, float $balance): string
@@ -525,13 +607,22 @@ class QboService
         return 'open';
     }
 
-    private function updateSyncState(string $companyId, string $realmId, string $status, int $progress, ?string $error = null): void
+    private function flushRiskScoreCache(string $companyId): void
     {
-        DB::table('integrations')
+        Cache::forget("risk_score:vendor:{$companyId}");
+        Cache::forget("risk_score:reconciliation:{$companyId}");
+        Cache::forget("risk_score:entity_relationship:{$companyId}");
+    }
+
+    private function updateSyncState(string $companyId, string $realmId, string $status, int $progress, ?string $error = null, ?string $businessProfileId = null): void
+    {
+        $query = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->where('realm_id', $realmId)
-            ->update([
+            ->where('realm_id', $realmId);
+        $this->scopeBusinessProfile($query, 'integrations', $businessProfileId);
+
+        $query->update([
                 'sync_status' => $status,
                 'sync_progress' => $progress,
                 'sync_error' => $error,
@@ -539,14 +630,16 @@ class QboService
             ]);
     }
 
-    private function markStaleSyncsFailed(string $companyId): void
+    private function markStaleSyncsFailed(string $companyId, ?string $businessProfileId = null): void
     {
-        DB::table('integrations')
+        $query = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
             ->where('sync_status', 'syncing')
-            ->where('updated_at', '<', now()->subMinutes(self::STALE_SYNC_MINUTES))
-            ->update([
+            ->where('updated_at', '<', now()->subMinutes(self::STALE_SYNC_MINUTES));
+        $this->scopeBusinessProfile($query, 'integrations', $businessProfileId);
+
+        $query->update([
                 'sync_status' => 'failed',
                 'sync_progress' => 0,
                 'sync_error' => 'Sync did not complete within 30 minutes. Please try again.',
@@ -554,13 +647,15 @@ class QboService
             ]);
     }
 
-    public function disconnect(string $companyId, string $realmId): void
+    public function disconnect(string $companyId, string $realmId, ?string $businessProfileId = null): void
     {
-        DB::table('integrations')
+        $query = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->where('realm_id', $realmId)
-            ->update([
+            ->where('realm_id', $realmId);
+        $this->scopeBusinessProfile($query, 'integrations', $businessProfileId);
+
+        $query->update([
                 'access_token_enc' => null,
                 'refresh_token_enc' => null,
                 'token_expires_at' => null,
@@ -568,76 +663,113 @@ class QboService
             ]);
     }
 
-    public function purge(string $companyId, string $realmId): void
+    public function purge(string $companyId, string $realmId, ?string $businessProfileId = null): void
     {
         if ($realmId === 'legacy') {
-            DB::table('qbo_transactions')->where('company_id', $companyId)->whereNull('realm_id')->delete();
-            DB::table('invoices')
+            $query = DB::table('qbo_transactions')->where('company_id', $companyId)->whereNull('realm_id');
+            $this->scopeBusinessProfile($query, 'qbo_transactions', $businessProfileId);
+            $query->delete();
+
+            $invoiceQuery = DB::table('invoices')
                 ->where('company_id', $companyId)
                 ->where('source', 'qbo')
-                ->where('row_content_hash', 'like', 'qbo:%:invoice:%')
-                ->delete();
+                ->where('row_content_hash', 'like', 'qbo:%:invoice:%');
+            $this->scopeBusinessProfile($invoiceQuery, 'invoices', $businessProfileId);
+            $invoiceQuery->delete();
         } else {
-            $integration = DB::table('integrations')->where('company_id', $companyId)->where('realm_id', $realmId)->first();
+            $integrationQuery = DB::table('integrations')->where('company_id', $companyId)->where('realm_id', $realmId);
+            $this->scopeBusinessProfile($integrationQuery, 'integrations', $businessProfileId);
+            $integration = $integrationQuery->first();
             if ($integration && $integration->sync_status === 'syncing') {
                 throw new Exception("Cannot purge data while a sync is in progress.", 400);
             }
-            DB::table('qbo_transactions')->where('company_id', $companyId)->where('realm_id', $realmId)->delete();
-            DB::table('invoices')
+            $transactionQuery = DB::table('qbo_transactions')->where('company_id', $companyId)->where('realm_id', $realmId);
+            $this->scopeBusinessProfile($transactionQuery, 'qbo_transactions', $businessProfileId);
+            $transactionQuery->delete();
+
+            $invoiceQuery = DB::table('invoices')
                 ->where('company_id', $companyId)
                 ->where('source', 'qbo')
-                ->where('row_content_hash', 'like', "qbo:{$realmId}:invoice:%")
-                ->delete();
+                ->where('row_content_hash', 'like', "qbo:{$realmId}:invoice:%");
+            $this->scopeBusinessProfile($invoiceQuery, 'invoices', $businessProfileId);
+            $invoiceQuery->delete();
         }
 
         // Only clear alerts when no transaction data remains for the company.
         // If other QB realms or file uploads still have data, the scoring engine
         // will rebuild alerts on its next run without losing coverage from surviving sources.
-        $hasRemainingData = DB::table('qbo_transactions')->where('company_id', $companyId)->exists()
-            || DB::table('transactions')->where('company_id', $companyId)->exists()
-            || DB::table('gnucash_transactions')->where('company_id', $companyId)->exists();
+        $qboRemaining = DB::table('qbo_transactions')->where('company_id', $companyId);
+        $this->scopeBusinessProfile($qboRemaining, 'qbo_transactions', $businessProfileId);
+        $transactionsRemaining = DB::table('transactions')->where('company_id', $companyId);
+        $this->scopeBusinessProfile($transactionsRemaining, 'transactions', $businessProfileId);
+        $gnucashRemaining = DB::table('gnucash_transactions')->where('company_id', $companyId);
+        $this->scopeBusinessProfile($gnucashRemaining, 'gnucash_transactions', $businessProfileId);
+
+        $hasRemainingData = $qboRemaining->exists()
+            || $transactionsRemaining->exists()
+            || $gnucashRemaining->exists();
 
         if (! $hasRemainingData) {
-            DB::table('alerts')->where('company_id', $companyId)->delete();
-            DB::table('alert_groups')->where('company_id', $companyId)->delete();
-            DB::table('alert_recommendations')->where('company_id', $companyId)->delete();
+            foreach (['alerts', 'alert_groups', 'alert_recommendations'] as $table) {
+                $query = DB::table($table)->where('company_id', $companyId);
+                $this->scopeBusinessProfile($query, $table, $businessProfileId);
+                $query->delete();
+            }
         }
 
         // We would dispatch a RulesEngine job here to rebuild alerts on remaining data
     }
 
-    public function saveCredentials(string $companyId, array $data): void
+    public function saveCredentials(string $companyId, array $data, ?string $businessProfileId = null): void
     {
         $clientIdEnc = encrypt($data['clientId']);
         $clientSecretEnc = encrypt($data['clientSecret']);
 
-        DB::table('integrations')->updateOrInsert(
-            ['company_id' => $companyId, 'provider' => 'quickbooks', 'realm_id' => null],
-            [
+        $keys = ['company_id' => $companyId, 'provider' => 'quickbooks', 'realm_id' => null];
+        $values = [
                 'client_id_enc' => $clientIdEnc,
                 'client_secret_enc' => $clientSecretEnc,
                 'environment' => $data['environment'],
                 'updated_at' => now(),
-            ]
-        );
+        ];
+        if ($this->hasBusinessProfileColumn('integrations')) {
+            $keys['business_profile_id'] = $businessProfileId;
+            $values['business_profile_id'] = $businessProfileId;
+        }
+
+        DB::table('integrations')->updateOrInsert($keys, $values);
     }
 
-    public function removeCredentials(string $companyId): void
+    public function removeCredentials(string $companyId, ?string $businessProfileId = null): void
     {
-        $connected = DB::table('integrations')
+        $connectedQuery = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->whereNotNull('access_token_enc')
-            ->exists();
+            ->whereNotNull('access_token_enc');
+        $this->scopeBusinessProfile($connectedQuery, 'integrations', $businessProfileId);
+        $connected = $connectedQuery->exists();
 
         if ($connected) {
             throw new Exception("Cannot remove credentials while QuickBooks is connected. Please disconnect first.", 400);
         }
 
-        DB::table('integrations')
+        $query = DB::table('integrations')
             ->where('company_id', $companyId)
             ->where('provider', 'quickbooks')
-            ->whereNull('realm_id')
-            ->delete();
+            ->whereNull('realm_id');
+        $this->scopeBusinessProfile($query, 'integrations', $businessProfileId);
+        $query->delete();
+    }
+
+    private function hasBusinessProfileColumn(string $table): bool
+    {
+        return Schema::hasTable($table) && Schema::hasColumn($table, 'business_profile_id');
+    }
+
+    private function scopeBusinessProfile($query, string $table, ?string $businessProfileId): void
+    {
+        if ($businessProfileId && $this->hasBusinessProfileColumn($table)) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
     }
 }

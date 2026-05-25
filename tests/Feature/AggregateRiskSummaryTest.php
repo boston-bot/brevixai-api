@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Agents\AggregateRiskSummaryService;
 use Database\Seeders\FraudScenarioSeeders\Phase1AgentFraudScenarioSeeder;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -28,6 +29,7 @@ class AggregateRiskSummaryTest extends TestCase
             'services.brevix_agent.timeout' => 10,
         ]);
 
+        Cache::flush();
         $this->aggregateService = app(AggregateRiskSummaryService::class);
 
         $this->createSchema();
@@ -195,11 +197,7 @@ class AggregateRiskSummaryTest extends TestCase
         $tx2->amount = 1500.00;
         $tx2->save();
 
-        $result = $this->aggregateService->getAggregateRiskSummary(Phase1AgentFraudScenarioSeeder::COMPANY_ID);
-
-        // Sum of triggered entity rules: shared_bank (20) + shared_addr (15) + shared_phone (10) + vendor_vendor (10) + duplicate_cluster (15) + concentration (10) = 80
-        // Plus vendor risk (New Vendor 15 + Concentration 20 + Rapid Payment 15 = 50)
-        // Adding more alerts to ensure overall score >= 90
+        // Adding more alerts and a transaction to push entity relationship risk above the 90 threshold
         $alertExtra = new Alert();
         $alertExtra->id = "88888888-1009-4999-9999-999999999999";
         $alertExtra->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;

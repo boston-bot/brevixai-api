@@ -8,6 +8,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Exception;
@@ -69,7 +70,7 @@ class ScanUploadJob implements ShouldQueue
                 $workbookMetadata = ['detectedContentType' => 'text/csv'];
             }
 
-            DB::table('upload_inspections')->insert([
+            $inspection = [
                 'id' => (string) Str::uuid(),
                 'upload_id' => $this->uploadId,
                 'company_id' => $this->companyId,
@@ -78,7 +79,12 @@ class ScanUploadJob implements ShouldQueue
                 'parser_warnings' => json_encode($parserWarnings),
                 'sample_preview' => json_encode($samplePreview),
                 'created_at' => now(),
-            ]);
+            ];
+            if (property_exists($upload, 'business_profile_id') && $upload->business_profile_id && Schema::hasColumn('upload_inspections', 'business_profile_id')) {
+                $inspection['business_profile_id'] = $upload->business_profile_id;
+            }
+
+            DB::table('upload_inspections')->insert($inspection);
 
             DB::table('uploads')->where('id', $this->uploadId)->update([
                 'status' => 'inspected',

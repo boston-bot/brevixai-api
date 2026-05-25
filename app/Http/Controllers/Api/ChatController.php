@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\RexProcess;
+use App\Exceptions\BusinessProfileAccessException;
 use App\Exceptions\BrevixAgentRunFailed;
 use App\Http\Controllers\Controller;
 use App\Services\Agents\BrevixAgentRunner;
+use App\Services\BusinessProfileContextService;
 use App\Services\ChatService;
 use App\Services\LlmService;
 use App\Services\RexChatRouterService;
@@ -20,23 +22,24 @@ class ChatController extends Controller
 {
     protected ChatService $chatService;
 
-    public function __construct(ChatService $chatService)
+    public function __construct(ChatService $chatService, ?BusinessProfileContextService $businessProfileContext = null)
     {
         $this->chatService = $chatService;
+        $this->businessProfileContext = $businessProfileContext ?: app(BusinessProfileContextService::class);
     }
+
+    private BusinessProfileContextService $businessProfileContext;
 
     /**
      * POST /api/chat/sessions
      */
     public function store(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
         try {
-            $session = $this->chatService->createSession($companyId, $request->user()->id, $request->input('title'));
+            $session = $this->chatService->createSession($context->companyId, $request->user()->id, $request->input('title'), $context->businessProfileId);
 
             return response()->json($session, 201);
         } catch (Exception $e) {
@@ -49,12 +52,10 @@ class ChatController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
-        $sessions = $this->chatService->listSessions($companyId);
+        $sessions = $this->chatService->listSessions($context->companyId, $context->businessProfileId);
 
         return response()->json($sessions);
     }
@@ -64,12 +65,10 @@ class ChatController extends Controller
      */
     public function show(Request $request, string $sessionId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
-        $session = $this->chatService->getSession($companyId, $sessionId);
+        $session = $this->chatService->getSession($context->companyId, $sessionId, $context->businessProfileId);
         if (! $session) {
             return response()->json(['error' => 'Session not found'], 404);
         }
@@ -82,12 +81,10 @@ class ChatController extends Controller
      */
     public function destroy(Request $request, string $sessionId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
-        $success = $this->chatService->deleteSession($companyId, $sessionId);
+        $success = $this->chatService->deleteSession($context->companyId, $sessionId, $context->businessProfileId);
         if (! $success) {
             return response()->json(['error' => 'Session not found'], 404);
         }
@@ -100,11 +97,11 @@ class ChatController extends Controller
      */
     public function sendMessage(Request $request, string $sessionId)
     {
-        $companyId = $request->user()->company_id;
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
+        $companyId = $context->companyId;
+        $businessProfileId = $context->businessProfileId;
         $userId = $request->user()->id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
 
         $content = $request->input('content');
         if (! $content) {
@@ -112,18 +109,18 @@ class ChatController extends Controller
         }
 
         // Verify session ownership
-        $session = $this->chatService->getSession($companyId, $sessionId);
+        $session = $this->chatService->getSession($companyId, $sessionId, $businessProfileId);
         if (! $session) {
             return response()->json(['error' => 'Session not found'], 404);
         }
 
         try {
-            $this->chatService->checkAndIncrementQuota($companyId);
+            $this->chatService->checkAndIncrementQuota($companyId, $businessProfileId);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], $e->getCode() ?: 429);
         }
 
-        $this->chatService->logUserMessage($companyId, $sessionId, $content);
+        $this->chatService->logUserMessage($companyId, $sessionId, $content, $businessProfileId);
 
         $llmService = app(LlmService::class);
         $chatRouter = app(RexChatRouterService::class);
@@ -131,7 +128,7 @@ class ChatController extends Controller
         $agentRunner = app(BrevixAgentRunner::class);
 
         // Set up SSE response
-        return new StreamedResponse(function () use ($companyId, $userId, $sessionId, $content, $llmService, $chatRouter, $orchestrator, $agentRunner) {
+        return new StreamedResponse(function () use ($companyId, $businessProfileId, $userId, $sessionId, $content, $llmService, $chatRouter, $orchestrator, $agentRunner) {
             // Turn off output buffering for PHP/Nginx
             if (function_exists('apache_setenv')) {
                 apache_setenv('no-gzip', '1');
@@ -144,14 +141,14 @@ class ChatController extends Controller
             try {
                 $this->emitSse('run.started', ['sessionId' => $sessionId]);
 
-                $session = $this->chatService->getSession($companyId, $sessionId);
+                $session = $this->chatService->getSession($companyId, $sessionId, $businessProfileId);
                 $messages = $this->messagesForLlm($session['messages'] ?? []);
                 $routeDecision = $chatRouter->route($content, $messages);
 
                 if ($routeDecision['mode'] === 'orchestrator') {
-                    $orchestrated = $orchestrator->handleRoute($companyId, (string) $routeDecision['route']);
+                    $orchestrated = $orchestrator->handleRoute($companyId, (string) $routeDecision['route'], $businessProfileId);
                     if ($orchestrated) {
-                        $this->emitOrchestratedResult($companyId, $sessionId, $orchestrated, $routeDecision['reason']);
+                        $this->emitOrchestratedResult($companyId, $sessionId, $orchestrated, $routeDecision['reason'], $businessProfileId);
 
                         return;
                     }
@@ -166,6 +163,7 @@ class ChatController extends Controller
                         $agentRunner,
                         $routeDecision['reason'],
                         (string) ($routeDecision['requested_action'] ?? RexProcess::RiskReview->value),
+                        $businessProfileId,
                     );
 
                     return;
@@ -179,7 +177,7 @@ class ChatController extends Controller
                 });
 
                 // Finalize and persist assistant response
-                $this->chatService->logAssistantMessage($companyId, $sessionId, $accumulatedContent, null);
+                $this->chatService->logAssistantMessage($companyId, $sessionId, $accumulatedContent, null, $businessProfileId);
 
                 $this->emitSse('message.completed', ['routedTo' => 'direct', 'artifactCount' => 0, 'actionCount' => 0]);
 
@@ -194,7 +192,7 @@ class ChatController extends Controller
         ]);
     }
 
-    private function emitOrchestratedResult(string $companyId, string $sessionId, array $orchestrated, string $reason): void
+    private function emitOrchestratedResult(string $companyId, string $sessionId, array $orchestrated, string $reason, ?string $businessProfileId = null): void
     {
         $this->emitSse('route.selected', ['route' => $orchestrated['route'], 'reason' => $reason]);
         $this->emitSse('tool.started', ['toolName' => $orchestrated['toolName']]);
@@ -216,7 +214,7 @@ class ChatController extends Controller
             'routedTo' => $orchestrated['route'],
             'artifacts' => $orchestrated['artifacts'],
         ];
-        $this->chatService->logAssistantMessage($companyId, $sessionId, $content, $structuredPayload);
+        $this->chatService->logAssistantMessage($companyId, $sessionId, $content, $structuredPayload, $businessProfileId);
 
         $this->emitSse('message.completed', [
             'routedTo' => $orchestrated['route'],
@@ -233,6 +231,7 @@ class ChatController extends Controller
         BrevixAgentRunner $agentRunner,
         string $reason,
         string $requestedAction = 'risk_review',
+        ?string $businessProfileId = null,
     ): void {
         $requestedAction = RexProcess::resolveOrDefault($requestedAction)->value;
         $route = 'agent.'.$requestedAction;
@@ -244,12 +243,13 @@ class ChatController extends Controller
         try {
             $agentResult = $agentRunner->run([
                 'company_id' => $companyId,
+                'business_profile_id' => $businessProfileId,
                 'user_id' => $userId,
                 'conversation_id' => $sessionId,
                 'message' => $content,
                 'requested_action' => $requestedAction,
                 'max_response_size' => BrevixAgentRunner::DEFAULT_MAX_RESPONSE_SIZE,
-                'page_context' => (object) [],
+                'page_context' => ['business_profile_id' => $businessProfileId],
             ]);
 
             $artifact = $this->agentArtifact($agentResult);
@@ -273,7 +273,7 @@ class ChatController extends Controller
                 'requiresReview' => (bool) ($agentResult['requires_review'] ?? false),
                 'degradedTools' => $agentResult['degraded_tools'] ?? [],
             ];
-            $this->chatService->logAssistantMessage($companyId, $sessionId, $message, $structuredPayload);
+            $this->chatService->logAssistantMessage($companyId, $sessionId, $message, $structuredPayload, $businessProfileId);
 
             $this->emitSse('message.completed', [
                 'routedTo' => $route,
@@ -301,7 +301,7 @@ class ChatController extends Controller
                 'artifacts' => [],
                 'actions' => [],
                 'requiresReview' => false,
-            ]);
+            ], $businessProfileId);
 
             $this->emitSse('message.completed', [
                 'routedTo' => $route,
@@ -370,12 +370,10 @@ class ChatController extends Controller
      */
     public function workspace(Request $request, string $sessionId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
-        $workspace = $this->chatService->getWorkspace($companyId, $sessionId);
+        $workspace = $this->chatService->getWorkspace($context->companyId, $sessionId, $context->businessProfileId);
 
         return response()->json($workspace);
     }
@@ -385,14 +383,13 @@ class ChatController extends Controller
      */
     public function confirmAction(Request $request, string $sessionId, string $actionId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
+        $companyId = $context->companyId;
         $userId = $request->user()->id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
 
         try {
-            $result = $this->chatService->confirmAction($companyId, $userId, $sessionId, $actionId);
+            $result = $this->chatService->confirmAction($companyId, $userId, $sessionId, $actionId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Exception $e) {
@@ -405,14 +402,13 @@ class ChatController extends Controller
      */
     public function rejectAction(Request $request, string $sessionId, string $actionId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
+        $companyId = $context->companyId;
         $userId = $request->user()->id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
 
         try {
-            $result = $this->chatService->rejectAction($companyId, $userId, $sessionId, $actionId);
+            $result = $this->chatService->rejectAction($companyId, $userId, $sessionId, $actionId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Exception $e) {
@@ -425,13 +421,20 @@ class ChatController extends Controller
      */
     public function usage(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
-        }
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) return $context;
 
-        $usage = $this->chatService->getUsage($companyId);
+        $usage = $this->chatService->getUsage($context->companyId, $context->businessProfileId);
 
         return response()->json($usage);
+    }
+
+    private function resolveContext(Request $request): \App\Services\BusinessProfileContext|JsonResponse
+    {
+        try {
+            return $this->businessProfileContext->resolveForRequest($request);
+        } catch (BusinessProfileAccessException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->statusCode());
+        }
     }
 }

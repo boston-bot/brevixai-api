@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\AlertRecommendationController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BusinessProfileController;
+use App\Http\Controllers\Api\BusinessProfileMemberController;
 use App\Http\Controllers\Api\CaseController;
 use App\Http\Controllers\Api\CaseRecommendationController;
 use App\Http\Controllers\Api\ChatController;
@@ -17,9 +19,13 @@ use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\InvestigationController;
 use App\Http\Controllers\Api\PersonalFinanceController;
 use App\Http\Controllers\Api\ReconciliationController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
+use App\Http\Controllers\Api\TaxNoticeController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\UploadController;
+use App\Http\Controllers\Api\WorkspaceMemberController;
 use App\Http\Controllers\Chat\AgentChatController;
 use App\Http\Controllers\Internal\AgentToolController;
 use Illuminate\Support\Facades\Route;
@@ -49,6 +55,9 @@ Route::prefix('auth')->group(function () {
 // QBO Callback (Handles Intuit redirect, uses state nonce for security, no Auth required)
 Route::get('integrations/qbo/callback', [IntegrationController::class, 'qboCallback']);
 
+// Stripe Webhooks (verified via signature — must be outside auth:sanctum)
+Route::post('webhooks/stripe', [StripeWebhookController::class, 'handle']);
+
 Route::prefix('internal/agent-tools')
     ->middleware('agent.tool')
     ->group(function () {
@@ -64,6 +73,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/dashboard', [AgentToolController::class, 'dashboard']);
         Route::get('/process-registry', [AgentToolController::class, 'processRegistry']);
         Route::get('/company/{companyId}/pending-recommendations', [AgentToolController::class, 'pendingRecommendations']);
+        Route::get('/company/{companyId}/behavioral-baseline', [AgentToolController::class, 'behavioralBaseline']);
         Route::get('/company/{companyId}/transaction-detail', [AgentToolController::class, 'transactionDetail']);
     });
 
@@ -81,6 +91,25 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/complete-onboarding', [AuthController::class, 'completeOnboarding']);
+    });
+
+    Route::prefix('business-profiles')->group(function () {
+        Route::get('/', [BusinessProfileController::class, 'index']);
+        Route::post('/', [BusinessProfileController::class, 'store']);
+        Route::get('/{id}', [BusinessProfileController::class, 'show']);
+        Route::patch('/{id}', [BusinessProfileController::class, 'update']);
+        Route::delete('/{id}', [BusinessProfileController::class, 'destroy']);
+
+        Route::get('/{id}/members', [BusinessProfileMemberController::class, 'index']);
+        Route::post('/{id}/members', [BusinessProfileMemberController::class, 'store']);
+        Route::patch('/{id}/members/{userId}', [BusinessProfileMemberController::class, 'update']);
+        Route::delete('/{id}/members/{userId}', [BusinessProfileMemberController::class, 'destroy']);
+    });
+
+    Route::prefix('workspace/members')->group(function () {
+        Route::get('/', [WorkspaceMemberController::class, 'index']);
+        Route::post('/', [WorkspaceMemberController::class, 'store']);
+        Route::patch('/{userId}', [WorkspaceMemberController::class, 'update']);
     });
 
     // Integrations
@@ -227,6 +256,12 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::post('/{id}/reject', [AgentApprovalController::class, 'reject']);
     });
 
+    // Notifications
+    Route::prefix('notifications')->group(function () {
+        Route::get('/config', [NotificationController::class, 'show']);
+        Route::post('/config', [NotificationController::class, 'update']);
+    });
+
     // Entity Graph
     Route::prefix('entity-graph')->group(function () {
         Route::get('/', [EntityGraphController::class, 'index']);
@@ -248,5 +283,10 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::patch('/discrepancies/{id}/status', [ReconciliationController::class, 'updateStatus']);
         Route::post('/discrepancies/{id}/confirm-action', [ReconciliationController::class, 'confirmAction']);
         Route::post('/discrepancies/{id}/notes', [ReconciliationController::class, 'addNote']);
+    });
+
+    // Tax Notices
+    Route::prefix('tax-notices')->group(function () {
+        Route::post('/interpret', [TaxNoticeController::class, 'interpret']);
     });
 });

@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\Alert;
 use App\Models\Transaction;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class VendorRiskScoringService
@@ -353,6 +354,13 @@ class VendorRiskScoringService
      * @return array
      */
     public function scoreAllVendors(string $companyId): array
+    {
+        return Cache::remember("risk_score:vendor:{$companyId}", 300, function () use ($companyId): array {
+            return $this->computeAllVendors($companyId);
+        });
+    }
+
+    private function computeAllVendors(string $companyId): array
     {
         $vendors = Transaction::where('company_id', $companyId)
             ->whereNotNull('vendor_customer')

@@ -12,7 +12,7 @@ class Transaction extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'upload_id', 'company_id', 'txn_id', 'date', 'department',
+        'upload_id', 'company_id', 'business_profile_id', 'txn_id', 'date', 'department',
         'vendor_customer', 'type', 'category', 'payment_method', 'amount',
         'invoice_ref', 'memo', 'anomaly_flag', 'anomaly_reason', 'raw_row',
         'import_batch_id', 'source_sheet_name', 'source_row_number',
