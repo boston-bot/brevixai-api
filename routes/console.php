@@ -9,3 +9,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('recommendations:expire')->daily();
+
+// IRM ingestion — fetch updated zip archives and re-parse into DB records weekly
+Schedule::command('irm:fetch')->weekly();
+Schedule::command('irm:parse')->weekly();
