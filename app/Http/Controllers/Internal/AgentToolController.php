@@ -546,8 +546,6 @@ class AgentToolController extends Controller
                 'type',
                 'category',
                 'anomaly_flag',
-                'memo',
-                'invoice_ref',
             ])
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -577,8 +575,6 @@ class AgentToolController extends Controller
             'category' => $transaction['category'] ?? null,
             'status' => (bool) ($transaction['anomaly_flag'] ?? false) ? 'flagged' : 'completed',
             'anomaly_flag' => (bool) ($transaction['anomaly_flag'] ?? false),
-            'memo' => $transaction['memo'] ?? null,
-            'invoice_number' => $transaction['invoice_ref'] ?? null,
         ];
     }
 
