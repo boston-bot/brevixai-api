@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\UploadController;
 use App\Http\Controllers\Api\WorkspaceMemberController;
 use App\Http\Controllers\Chat\AgentChatController;
 use App\Http\Controllers\Internal\AgentToolController;
+use App\Http\Controllers\Internal\IrmKnowledgeController;
 use Illuminate\Support\Facades\Route;
 
 $personalFinanceRoutes = function (): void {
@@ -78,6 +79,11 @@ Route::prefix('internal/agent-tools')
         Route::get('/company/{companyId}/pending-recommendations', [AgentToolController::class, 'pendingRecommendations']);
         Route::get('/company/{companyId}/behavioral-baseline', [AgentToolController::class, 'behavioralBaseline']);
         Route::get('/company/{companyId}/transaction-detail', [AgentToolController::class, 'transactionDetail']);
+        Route::get('/irs/irm/search', [IrmKnowledgeController::class, 'search']);
+        Route::get('/irs/irm/section', [IrmKnowledgeController::class, 'section']);
+        Route::get('/irs/notice-type', [IrmKnowledgeController::class, 'noticeType']);
+        Route::get('/irs/records-checklist', [IrmKnowledgeController::class, 'recordsChecklist']);
+        Route::get('/irs/collection-risk', [IrmKnowledgeController::class, 'collectionRisk']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
