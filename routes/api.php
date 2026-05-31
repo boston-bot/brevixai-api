@@ -84,6 +84,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/irs/notice-type', [IrmKnowledgeController::class, 'noticeType']);
         Route::get('/irs/records-checklist', [IrmKnowledgeController::class, 'recordsChecklist']);
         Route::get('/irs/collection-risk', [IrmKnowledgeController::class, 'collectionRisk']);
+        Route::post('/irs/notice/extract', [IrmKnowledgeController::class, 'extractNotice']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {

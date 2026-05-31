@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Internal;
 
 use App\Http\Controllers\Controller;
 use App\Services\IrmKnowledgeService;
+use App\Services\IrsNoticeExtractionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -89,6 +90,23 @@ class IrmKnowledgeController extends Controller
             ));
         } catch (Throwable $e) {
             return $this->safeFailure($request, 'irs_collection_risk', $e);
+        }
+    }
+
+    public function extractNotice(Request $request, IrsNoticeExtractionService $service): JsonResponse
+    {
+        $validated = $request->validate([
+            'text' => ['required', 'string', 'min:20', 'max:10000'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:10'],
+        ]);
+
+        try {
+            return response()->json($service->extract(
+                $validated['text'],
+                (int) ($validated['limit'] ?? 5)
+            ));
+        } catch (Throwable $e) {
+            return $this->safeFailure($request, 'irs_notice_extract', $e);
         }
     }
 
