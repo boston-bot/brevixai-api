@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\ActionPlanController;
+use App\Http\Controllers\Api\Admin\SiteArticleController;
+use App\Http\Controllers\Api\Admin\SitePageController;
+use App\Http\Controllers\Api\Admin\SiteSettingsController;
 use App\Http\Controllers\Api\AgentApprovalController;
 use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AlertRecommendationController;
@@ -23,6 +26,7 @@ use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PersonalFinanceController;
 use App\Http\Controllers\Api\ReconciliationController;
 use App\Http\Controllers\Api\ReviewSnapshotController;
+use App\Http\Controllers\Api\SiteContentController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TaxNoticeController;
@@ -56,6 +60,13 @@ Route::prefix('auth')->group(function () {
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
+Route::prefix('site')->group(function () {
+    Route::get('/settings', [SiteContentController::class, 'settings']);
+    Route::get('/pages/{key}', [SiteContentController::class, 'page']);
+    Route::get('/articles', [SiteContentController::class, 'articles']);
+    Route::get('/articles/{slug}', [SiteContentController::class, 'article']);
+});
+
 // QBO Callback (Handles Intuit redirect, uses state nonce for security, no Auth required)
 Route::get('integrations/qbo/callback', [IntegrationController::class, 'qboCallback']);
 
@@ -84,6 +95,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/irs/notice-type', [IrmKnowledgeController::class, 'noticeType']);
         Route::get('/irs/records-checklist', [IrmKnowledgeController::class, 'recordsChecklist']);
         Route::get('/irs/collection-risk', [IrmKnowledgeController::class, 'collectionRisk']);
+        Route::post('/irs/notice/extract', [IrmKnowledgeController::class, 'extractNotice']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
@@ -94,6 +106,29 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     Route::prefix('admin/personal-finance')
         ->middleware(['personal.finance.enabled', 'admin'])
         ->group($personalFinanceRoutes);
+
+    Route::prefix('admin/site')
+        ->middleware('admin')
+        ->group(function (): void {
+            Route::get('/settings', [SiteSettingsController::class, 'show']);
+            Route::patch('/settings', [SiteSettingsController::class, 'update']);
+            Route::get('/settings/preview', [SiteSettingsController::class, 'preview']);
+            Route::post('/settings/publish', [SiteSettingsController::class, 'publish']);
+            Route::post('/assets', [SiteSettingsController::class, 'storeAsset']);
+
+            Route::get('/pages/{key}', [SitePageController::class, 'show']);
+            Route::patch('/pages/{key}/draft', [SitePageController::class, 'saveDraft']);
+            Route::get('/pages/{key}/preview', [SitePageController::class, 'preview']);
+            Route::post('/pages/{key}/publish', [SitePageController::class, 'publish']);
+
+            Route::get('/articles', [SiteArticleController::class, 'index']);
+            Route::post('/articles', [SiteArticleController::class, 'store']);
+            Route::get('/articles/{id}', [SiteArticleController::class, 'show']);
+            Route::patch('/articles/{id}/draft', [SiteArticleController::class, 'saveDraft']);
+            Route::get('/articles/{id}/preview', [SiteArticleController::class, 'preview']);
+            Route::post('/articles/{id}/publish', [SiteArticleController::class, 'publish']);
+            Route::post('/articles/{id}/remove-from-public', [SiteArticleController::class, 'removeFromPublic']);
+        });
 
     // Protected Auth Routes
     Route::prefix('auth')->group(function () {
