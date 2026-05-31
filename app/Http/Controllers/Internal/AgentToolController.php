@@ -495,12 +495,12 @@ class AgentToolController extends Controller
 
         $limit = $request->query('limit');
         if ($limit !== null && filter_var($limit, FILTER_VALIDATE_INT) === false) {
-            return response()->json(['error' => 'Invalid limit. Use an integer from 1 to 20.'], 422);
+            return response()->json(['error' => 'Invalid limit. Use an integer from 1 to 500.'], 422);
         }
 
         $limitValue = (int) ($limit ?? 10);
-        if ($limitValue < 1 || $limitValue > 20) {
-            return response()->json(['error' => 'Invalid limit. Use an integer from 1 to 20.'], 422);
+        if ($limitValue < 1 || $limitValue > 500) {
+            return response()->json(['error' => 'Invalid limit. Use an integer from 1 to 500.'], 422);
         }
 
         return null;
@@ -515,7 +515,7 @@ class AgentToolController extends Controller
 
     private function transactionSummary(Request $request, string $companyId): array
     {
-        $limit = min(max((int) $request->query('limit', 10), 1), 20);
+        $limit = min(max((int) $request->query('limit', 10), 1), 500);
         $filters = [
             'date_from' => $request->query('date_from'),
             'date_to' => $request->query('date_to'),
@@ -546,6 +546,8 @@ class AgentToolController extends Controller
                 'type',
                 'category',
                 'anomaly_flag',
+                'memo',
+                'invoice_ref',
             ])
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -575,6 +577,8 @@ class AgentToolController extends Controller
             'category' => $transaction['category'] ?? null,
             'status' => (bool) ($transaction['anomaly_flag'] ?? false) ? 'flagged' : 'completed',
             'anomaly_flag' => (bool) ($transaction['anomaly_flag'] ?? false),
+            'memo' => $transaction['memo'] ?? null,
+            'invoice_number' => $transaction['invoice_ref'] ?? null,
         ];
     }
 
