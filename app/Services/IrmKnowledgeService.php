@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\IrmDocument;
 use App\Models\IrmSection;
 use App\Support\ProfessionalServicesDisclaimer;
 use Illuminate\Support\Collection;
@@ -11,6 +12,30 @@ class IrmKnowledgeService
 {
     private const DEFAULT_LIMIT = 5;
     private const MAX_LIMIT = 10;
+
+    /** @var array<int, array{phrases: list<string>, prefixes: list<string>}> */
+    private const QUERY_PREFIX_BOOSTS = [
+        [
+            'phrases' => ['levy', 'cp504', 'lt11', '1058', 'cdp'],
+            'prefixes' => ['5.11.', '5.19.'],
+        ],
+        [
+            'phrases' => ['lien', 'ftl'],
+            'prefixes' => ['5.12.'],
+        ],
+        [
+            'phrases' => ['trust fund', 'tfrp', 'payroll', 'employment tax'],
+            'prefixes' => ['5.7.', '8.25.', '20.1.'],
+        ],
+        [
+            'phrases' => ['installment', 'payment plan', 'balance due'],
+            'prefixes' => ['5.14.', '5.19.'],
+        ],
+        [
+            'phrases' => ['cp2000', 'underreported', 'underreporter'],
+            'prefixes' => ['4.19.', '20.1.', '4.10.'],
+        ],
+    ];
 
     private const NOTICE_QUERIES = [
         'CP2000' => 'CP2000 underreported income proposed changes notice deficiency',
@@ -39,16 +64,39 @@ class IrmKnowledgeService
     /** @return array<string, mixed> */
     public function section(string $reference): array
     {
-        $reference = trim($reference);
+        $reference = $this->normalizeReference($reference);
         $section = IrmSection::query()
             ->with('document')
             ->where('irm_reference', $reference)
             ->first();
 
+        if ($section) {
+            $results = [$this->serializeSection($section)];
+        } else {
+            $document = IrmDocument::query()
+                ->where('irm_reference', $reference)
+                ->first();
+
+            if ($document) {
+                $results = [$this->serializeDocumentReference($document)];
+            } else {
+                $descendants = IrmSection::query()
+                    ->with('document')
+                    ->whereRaw('LOWER(irm_sections.irm_reference) LIKE ?', [strtolower($reference).'.%'])
+                    ->orderBy('irm_reference')
+                    ->limit(3)
+                    ->get();
+
+                $results = $descendants->isNotEmpty()
+                    ? [$this->serializeReferenceGroup($reference, $descendants)]
+                    : [];
+            }
+        }
+
         return [
-            'status' => $section ? 'ok' : 'no_results',
+            'status' => $results ? 'ok' : 'no_results',
             'reference' => $reference,
-            'results' => $section ? [$this->serializeSection($section)] : [],
+            'results' => $results,
             'disclaimer' => ProfessionalServicesDisclaimer::TEXT,
         ];
     }
@@ -117,6 +165,8 @@ class IrmKnowledgeService
             return collect();
         }
 
+        [$scoreSql, $scoreBindings] = $this->relevanceScore($query, $terms);
+
         return IrmSection::query()
             ->with('document')
             ->where(function ($sectionQuery) use ($terms): void {
@@ -133,10 +183,67 @@ class IrmKnowledgeService
                         });
                 }
             })
+            ->selectRaw("irm_sections.*, ({$scoreSql}) AS relevance_score", $scoreBindings)
+            ->orderByRaw('relevance_score DESC')
             ->orderBy('irm_reference')
             ->limit($limit)
             ->get()
             ->map(fn (IrmSection $section): array => $this->serializeSection($section));
+    }
+
+    /**
+     * Build a SQL expression that scores each section by procedural relevance.
+     *
+     * @param list<string> $terms
+     * @return array{0: string, 1: list<mixed>}
+     */
+    private function relevanceScore(string $query, array $terms): array
+    {
+        $lowerQuery = strtolower(trim($query));
+        $boostPrefixes = $this->boostPrefixesForQuery($lowerQuery);
+
+        $parts = [];
+        $bindings = [];
+
+        // Issue-family prefix boosts — highest-weight signal for procedural queries
+        foreach ($boostPrefixes as $prefix) {
+            $parts[] = 'CASE WHEN LOWER(irm_sections.irm_reference) LIKE ? THEN 60 ELSE 0 END';
+            $bindings[] = $prefix . '%';
+        }
+
+        // Exact reference match — useful when the topic is an IRM reference string
+        $parts[] = 'CASE WHEN LOWER(irm_sections.irm_reference) = ? THEN 100 ELSE 0 END';
+        $bindings[] = $lowerQuery;
+
+        // Per-term title matches
+        foreach (array_slice($terms, 0, 4) as $term) {
+            $parts[] = 'CASE WHEN LOWER(irm_sections.title) LIKE ? THEN 10 ELSE 0 END';
+            $bindings[] = '%' . $term . '%';
+        }
+
+        // Per-term body matches
+        foreach (array_slice($terms, 0, 4) as $term) {
+            $parts[] = 'CASE WHEN LOWER(irm_sections.body_text) LIKE ? THEN 3 ELSE 0 END';
+            $bindings[] = '%' . $term . '%';
+        }
+
+        return [implode(' + ', $parts), $bindings];
+    }
+
+    /** @return list<string> */
+    private function boostPrefixesForQuery(string $lowerQuery): array
+    {
+        $prefixes = [];
+        foreach (self::QUERY_PREFIX_BOOSTS as $group) {
+            foreach ($group['phrases'] as $phrase) {
+                if (str_contains($lowerQuery, $phrase)) {
+                    array_push($prefixes, ...$group['prefixes']);
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($prefixes));
     }
 
     /** @return list<string> */
@@ -174,6 +281,11 @@ class IrmKnowledgeService
 
     private function queryForIssueType(string $issueType): string
     {
+        $noticeQuery = $this->queryForNoticeCode($issueType);
+        if ($noticeQuery !== null) {
+            return $noticeQuery;
+        }
+
         $normalized = strtolower($issueType);
 
         if (str_contains($normalized, 'levy')) {
@@ -199,6 +311,14 @@ class IrmKnowledgeService
     {
         $normalized = strtolower($issueType);
 
+        $noticeCode = $this->noticeCodeFrom($issueType);
+        if (in_array($noticeCode, ['CP504', 'LT11', '1058'], true)) {
+            return 'critical';
+        }
+        if (in_array($noticeCode, ['CP3219A'], true)) {
+            return 'high';
+        }
+
         if (
             str_contains($normalized, 'levy') ||
             str_contains($normalized, 'seizure') ||
@@ -219,6 +339,37 @@ class IrmKnowledgeService
     private function recordsForIssueType(string $issueType): array
     {
         $normalized = strtolower($issueType);
+
+        $noticeCode = $this->noticeCodeFrom($issueType);
+        if (in_array($noticeCode, ['CP504', 'LT11', '1058'], true)) {
+            return [
+                'The IRS notice or letter, including all pages and dates.',
+                'Account transcripts for the tax periods named in the notice.',
+                'Payment history and confirmation records.',
+                'Prior IRS correspondence and any collection appeal submissions.',
+                'Current financial records needed to discuss collection alternatives with a tax professional.',
+            ];
+        }
+
+        if ($noticeCode === 'CP2000') {
+            return [
+                'The full CP2000 notice, including proposed changes and response pages.',
+                'The originally filed return for the tax year named in the notice.',
+                'Forms W-2, 1099, K-1, brokerage, payment-card, or third-party network statements tied to the mismatch.',
+                'Business income records and reconciliation workpapers for the reported amounts.',
+                'Prior correspondence or response drafts about the proposed changes.',
+            ];
+        }
+
+        if ($noticeCode === 'CP3219A') {
+            return [
+                'The full statutory notice, including the petition deadline page.',
+                'The originally filed return and any proposed deficiency schedules.',
+                'Income, deduction, credit, and payment records tied to the disputed items.',
+                'Prior CP2000 or examination correspondence.',
+                'Notes from any tax professional already involved.',
+            ];
+        }
 
         if (str_contains($normalized, 'levy')) {
             return [
@@ -247,5 +398,76 @@ class IrmKnowledgeService
             'Supporting business records tied to the IRS issue.',
             'Prior correspondence or professional notes about attempted resolution.',
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializeDocumentReference(IrmDocument $document): array
+    {
+        $sections = $document->sections()
+            ->orderBy('irm_reference')
+            ->limit(3)
+            ->get();
+
+        return [
+            'irm_reference' => $document->irm_reference,
+            'document_title' => $document->title,
+            'section_title' => $document->title,
+            'effective_date' => $document->effective_date?->format('Y-m-d'),
+            'excerpt' => $this->excerptFromSections($sections),
+            'source_type' => 'irm',
+            's3_key' => $document->s3_key,
+        ];
+    }
+
+    /**
+     * @param Collection<int, IrmSection> $sections
+     * @return array<string, mixed>
+     */
+    private function serializeReferenceGroup(string $reference, Collection $sections): array
+    {
+        $first = $sections->first();
+        $document = $first?->document;
+
+        return [
+            'irm_reference' => $reference,
+            'document_title' => $document?->title,
+            'section_title' => $first?->title ?: $document?->title,
+            'effective_date' => ($first?->effective_date ?? $document?->effective_date)?->format('Y-m-d'),
+            'excerpt' => $this->excerptFromSections($sections),
+            'source_type' => 'irm',
+            's3_key' => $document?->s3_key,
+        ];
+    }
+
+    /** @param Collection<int, IrmSection> $sections */
+    private function excerptFromSections(Collection $sections): string
+    {
+        $text = $sections
+            ->map(fn (IrmSection $section): string => trim($section->body_text))
+            ->filter()
+            ->implode(' ');
+
+        return Str::limit(preg_replace('/\s+/', ' ', trim($text)) ?? '', 700);
+    }
+
+    private function queryForNoticeCode(string $issueType): ?string
+    {
+        $noticeCode = $this->noticeCodeFrom($issueType);
+
+        return $noticeCode !== null ? (self::NOTICE_QUERIES[$noticeCode] ?? null) : null;
+    }
+
+    private function noticeCodeFrom(string $value): ?string
+    {
+        $normalized = strtoupper(preg_replace('/\s+/', '', trim($value)) ?? '');
+
+        return $normalized !== '' && array_key_exists($normalized, self::NOTICE_QUERIES)
+            ? $normalized
+            : null;
+    }
+
+    private function normalizeReference(string $reference): string
+    {
+        return preg_replace('/^IRM\s+/i', '', trim($reference)) ?? trim($reference);
     }
 }
