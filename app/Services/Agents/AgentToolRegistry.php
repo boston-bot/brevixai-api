@@ -33,6 +33,11 @@ class AgentToolRegistry
             'pending_recommendations'  => 'company/{companyId}/pending-recommendations',
             'behavioral_baseline'      => 'company/{companyId}/behavioral-baseline',
             'process_registry'         => 'process-registry',
+            'irm_search'               => 'irs/irm/search',
+            'irm_section'              => 'irs/irm/section',
+            'irs_notice_type'          => 'irs/notice-type',
+            'irs_records_checklist'    => 'irs/records-checklist',
+            'irs_collection_risk'      => 'irs/collection-risk',
         ];
     }
 
