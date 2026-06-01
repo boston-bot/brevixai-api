@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+use App\Services\Agents\AlertRecommendationService;
+use App\Services\Agents\CaseRecommendationService;
+
 class RexOrchestratorService
 {
     /** @return array<int, string> */
@@ -44,20 +47,20 @@ class RexOrchestratorService
     public function handleRoute(string $companyId, string $route, ?string $businessProfileId = null): ?array
     {
         return match ($route) {
-            'dashboard' => $this->dashboard($companyId),
-            'analytics' => $this->analytics($companyId),
+            'dashboard' => $this->dashboard($companyId, $businessProfileId),
+            'analytics' => $this->analytics($companyId, $businessProfileId),
             'alerts' => $this->alerts($companyId),
             'suspicious' => $this->suspicious($companyId),
             'reconciliation' => $this->reconciliation($companyId),
             'ar' => $this->arAging($companyId),
-            'vendors' => $this->vendors($companyId),
+            'vendors' => $this->vendors($companyId, $businessProfileId),
             'cases' => $this->cases($companyId),
             'alert_recommendations' => $this->alertRecommendations($companyId),
             'case_recommendations' => $this->caseRecommendations($companyId),
             'controls' => $this->controls($companyId),
             'transactions' => $this->transactions($companyId, $businessProfileId),
             'transaction_lookup' => $this->transactions($companyId, $businessProfileId),
-            'dashboard_health' => $this->dashboardHealth($companyId),
+            'dashboard_health' => $this->dashboardHealth($companyId, $businessProfileId),
             'controls_review' => $this->controls($companyId),
             'reconciliation_review' => $this->reconciliation($companyId),
             'entity_graph_review' => $this->entityGraph($companyId),
@@ -67,9 +70,9 @@ class RexOrchestratorService
         };
     }
 
-    private function dashboard(string $companyId): array
+    private function dashboard(string $companyId, ?string $businessProfileId): array
     {
-        $data = app(DashboardService::class)->summary($companyId);
+        $data = app(DashboardService::class)->summary($companyId, $businessProfileId);
 
         return $this->result(
             'financial_overview',
@@ -85,13 +88,13 @@ class RexOrchestratorService
         );
     }
 
-    private function analytics(string $companyId): array
+    private function analytics(string $companyId, ?string $businessProfileId): array
     {
         $analytics = app(AnalyticsService::class);
         $data = [
-            'summary' => $analytics->getPerformanceSummary($companyId),
-            'topVendors' => $analytics->getTopVendors($companyId, 5),
-            'cashFlow' => $analytics->getCashFlowAnalytics($companyId),
+            'summary' => $analytics->getPerformanceSummary($companyId, $businessProfileId),
+            'topVendors' => $analytics->getTopVendors($companyId, $businessProfileId, 5),
+            'cashFlow' => $analytics->getCashFlowAnalytics($companyId, $businessProfileId),
         ];
 
         return $this->result(
@@ -175,9 +178,9 @@ class RexOrchestratorService
         );
     }
 
-    private function vendors(string $companyId): array
+    private function vendors(string $companyId, ?string $businessProfileId): array
     {
-        $vendors = app(AnalyticsService::class)->getTopVendors($companyId, 10);
+        $vendors = app(AnalyticsService::class)->getTopVendors($companyId, $businessProfileId, 10);
 
         return $this->result(
             'vendor_analysis',
@@ -224,7 +227,7 @@ class RexOrchestratorService
 
     private function alertRecommendations(string $companyId): array
     {
-        $data = app(\App\Services\Agents\AlertRecommendationService::class)->getAlertRecommendations($companyId);
+        $data = app(AlertRecommendationService::class)->getAlertRecommendations($companyId);
 
         return $this->result(
             'alert_recommendations',
@@ -237,7 +240,7 @@ class RexOrchestratorService
 
     private function caseRecommendations(string $companyId): array
     {
-        $data = app(\App\Services\Agents\CaseRecommendationService::class)->getCaseRecommendations($companyId);
+        $data = app(CaseRecommendationService::class)->getCaseRecommendations($companyId);
 
         return $this->result(
             'case_recommendations',
@@ -266,9 +269,9 @@ class RexOrchestratorService
         );
     }
 
-    private function dashboardHealth(string $companyId): array
+    private function dashboardHealth(string $companyId, ?string $businessProfileId): array
     {
-        $dashboard = app(DashboardService::class)->summary($companyId);
+        $dashboard = app(DashboardService::class)->summary($companyId, $businessProfileId);
         $alertData = app(AlertService::class)->list($companyId, ['status' => 'open', 'limit' => 10], true);
         $controlsData = app(ControlsService::class)->health($companyId);
 
