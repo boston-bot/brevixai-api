@@ -49,4 +49,20 @@ class Alert extends Model
     {
         return $this->belongsTo(User::class, 'reviewed_by');
     }
+
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        
+        $array['reasonCodes'] = $this->reason_codes;
+        $array['sourceSystem'] = $this->source_system;
+        $array['evidenceRefs'] = $this->evidence_refs;
+        $array['confidenceScore'] = $this->confidence_score;
+        $array['deterministicCheckName'] = $this->rule_key;
+        $array['comparisonWindow'] = $this->comparison_window;
+        $array['sourceFreshness'] = $this->created_at?->diffForHumans();
+        $array['humanReviewStatus'] = $this->status === 'reviewed' ? 'reviewed' : 'pending';
+
+        return $array;
+    }
 }

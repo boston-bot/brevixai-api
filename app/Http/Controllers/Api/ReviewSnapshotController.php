@@ -34,7 +34,7 @@ class ReviewSnapshotController extends Controller
         $dataSources = $this->dataSources->forContext($context->companyId, $context->businessProfileId);
         $requirementsPayload = $this->evidenceRequirements->requirementsForSession($session, $dataSources);
 
-        return response()->json($this->firstSnapshot->placeholder($session, $requirementsPayload, $dataSources));
+        return response()->json($this->firstSnapshot->build($session, $requirementsPayload, $dataSources));
     }
 
     private function resolveContext(Request $request): BusinessProfileContext|JsonResponse
