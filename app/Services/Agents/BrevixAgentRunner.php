@@ -10,6 +10,7 @@ use App\Models\AgentStep;
 use App\Models\ChatMessage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Throwable;
 
 class BrevixAgentRunner
@@ -275,7 +276,7 @@ class BrevixAgentRunner
                 'error_class' => $e::class,
             ]);
 
-            throw new \App\Exceptions\BrevixAgentRunFailed($agentRun->id, $e);
+            throw new BrevixAgentRunFailed($agentRun->id, $e);
         }
     }
 
@@ -393,16 +394,16 @@ class BrevixAgentRunner
         $allowedKeys = RexProcess::resolveOrDefault($requestedAction)->tools();
 
         $purposes = [
-            'company_context'          => ['optional' => false, 'purpose' => 'Load company, data-source, user-role, dashboard, and bounded transaction context through Laravel tenant checks.', 'data_authority' => 'laravel'],
-            'risk_summary'             => ['optional' => false, 'purpose' => 'Use as the primary deterministic risk score and top-driver source for risk review responses.', 'score_authority' => 'laravel'],
-            'vendor_risk'              => ['optional' => true, 'purpose' => 'Use for vendor concentration, vendor onboarding, payment-pattern, and named-vendor risk analysis.', 'score_authority' => 'laravel'],
-            'reconciliation_risk'      => ['optional' => true, 'purpose' => 'Use for bank-to-ledger mismatch, stale discrepancy, and reconciliation-drift analysis.', 'score_authority' => 'laravel'],
+            'company_context' => ['optional' => false, 'purpose' => 'Load company, data-source, user-role, dashboard, and bounded transaction context through Laravel tenant checks.', 'data_authority' => 'laravel'],
+            'risk_summary' => ['optional' => false, 'purpose' => 'Use as the primary deterministic risk score and top-driver source for risk review responses.', 'score_authority' => 'laravel'],
+            'vendor_risk' => ['optional' => true, 'purpose' => 'Use for vendor concentration, vendor onboarding, payment-pattern, and named-vendor risk analysis.', 'score_authority' => 'laravel'],
+            'reconciliation_risk' => ['optional' => true, 'purpose' => 'Use for bank-to-ledger mismatch, stale discrepancy, and reconciliation-drift analysis.', 'score_authority' => 'laravel'],
             'entity_relationship_risk' => ['optional' => true, 'purpose' => 'Use for employee/vendor overlap, shared contact data, duplicate entity, and related-party risk analysis.', 'score_authority' => 'laravel'],
-            'aggregate_risk_summary'   => ['optional' => true, 'purpose' => 'Use during fraud or risk analysis when a cross-domain deterministic score and evidence summary would improve the response.', 'score_authority' => 'laravel'],
-            'alert_recommendations'    => ['optional' => true, 'purpose' => 'Use during fraud or risk analysis when deterministic alert recommendation drafts would improve the response.', 'recommendation_authority' => 'laravel'],
-            'case_recommendations'     => ['optional' => true, 'purpose' => 'Use during risk analysis when deterministic case recommendation drafts would improve the response.', 'recommendation_authority' => 'laravel'],
-            'pending_recommendations'  => ['optional' => true, 'purpose' => 'Use to surface pending alert and case recommendations so the response can acknowledge open items awaiting user action.', 'recommendation_authority' => 'laravel'],
-            'transaction_detail'       => ['optional' => true, 'purpose' => 'Use to fetch specific transaction records by UUID when the user references a known transaction ID. Returns amount, date, vendor, type, and anomaly data.', 'data_authority' => 'laravel'],
+            'aggregate_risk_summary' => ['optional' => true, 'purpose' => 'Use during fraud or risk analysis when a cross-domain deterministic score and evidence summary would improve the response.', 'score_authority' => 'laravel'],
+            'alert_recommendations' => ['optional' => true, 'purpose' => 'Use during fraud or risk analysis when deterministic alert recommendation drafts would improve the response.', 'recommendation_authority' => 'laravel'],
+            'case_recommendations' => ['optional' => true, 'purpose' => 'Use during risk analysis when deterministic case recommendation drafts would improve the response.', 'recommendation_authority' => 'laravel'],
+            'pending_recommendations' => ['optional' => true, 'purpose' => 'Use to surface pending alert and case recommendations so the response can acknowledge open items awaiting user action.', 'recommendation_authority' => 'laravel'],
+            'transaction_detail' => ['optional' => true, 'purpose' => 'Use to fetch specific transaction records by UUID when the user references a known transaction ID. Returns amount, date, vendor, type, and anomaly data.', 'data_authority' => 'laravel'],
         ];
 
         $keys = empty($allowedKeys) ? array_keys($purposes) : $allowedKeys;
@@ -422,7 +423,14 @@ class BrevixAgentRunner
                 continue;
             }
             $tools[$key] = array_merge(
-                ['method' => 'GET', 'path' => $path, 'deterministic' => true, 'requires_user_context_header' => true],
+                [
+                    'method' => 'GET',
+                    'path' => $path,
+                    'deterministic' => true,
+                    'requires_user_context_header' => true,
+                    'requires_business_profile_context' => true,
+                    'business_profile_header' => 'X-Brevix-Business-Profile-Id',
+                ],
                 $purposes[$key]
             );
         }
@@ -471,8 +479,8 @@ class BrevixAgentRunner
     }
 
     /**
-     * @param array<string, mixed> $agentResponse
-     * @param array<int, mixed> $steps
+     * @param  array<string, mixed>  $agentResponse
+     * @param  array<int, mixed>  $steps
      * @return array<int, array<string, mixed>>
      */
     private function degradedTools(array $agentResponse, array $steps): array
@@ -518,7 +526,7 @@ class BrevixAgentRunner
      */
     private function loadConversationHistory(?string $conversationId, string $companyId, ?string $businessProfileId = null): ?array
     {
-        if (! $conversationId || ! \Illuminate\Support\Str::isUuid($conversationId)) {
+        if (! $conversationId || ! Str::isUuid($conversationId)) {
             return null;
         }
 

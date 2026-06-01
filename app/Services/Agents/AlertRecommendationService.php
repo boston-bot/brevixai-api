@@ -38,10 +38,10 @@ class AlertRecommendationService
      */
     public function getAlertRecommendations(string $companyId, ?string $businessProfileId = null): array
     {
-        $aggregateSummary = $this->aggregateRiskSummaryService->getAggregateRiskSummary($companyId);
-        $vendorScores = $this->vendorRiskScoringService->scoreAllVendors($companyId);
-        $reconciliationRisk = $this->reconciliationRiskScoringService->scoreReconciliation($companyId);
-        $entityRelationshipRisk = $this->entityRelationshipRiskScoringService->scoreEntityRelationships($companyId);
+        $aggregateSummary = $this->aggregateRiskSummaryService->getAggregateRiskSummary($companyId, $businessProfileId);
+        $vendorScores = $this->vendorRiskScoringService->scoreAllVendors($companyId, $businessProfileId);
+        $reconciliationRisk = $this->reconciliationRiskScoringService->scoreReconciliation($companyId, $businessProfileId);
+        $entityRelationshipRisk = $this->entityRelationshipRiskScoringService->scoreEntityRelationships($companyId, $businessProfileId);
 
         $recommendations = [];
 

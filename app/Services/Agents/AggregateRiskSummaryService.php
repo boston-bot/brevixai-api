@@ -21,15 +21,15 @@ class AggregateRiskSummaryService
      *
      * @return array<string, mixed>
      */
-    public function getAggregateRiskSummary(string $companyId): array
+    public function getAggregateRiskSummary(string $companyId, ?string $businessProfileId = null): array
     {
-        $vendorScores = $this->vendorRiskService->scoreAllVendors($companyId);
+        $vendorScores = $this->vendorRiskService->scoreAllVendors($companyId, $businessProfileId);
         $vendorRiskScore = $this->highestVendorRiskScore($vendorScores);
 
-        $reconciliationResult = $this->reconciliationRiskService->scoreReconciliation($companyId);
+        $reconciliationResult = $this->reconciliationRiskService->scoreReconciliation($companyId, $businessProfileId);
         $reconciliationRiskScore = (int) ($reconciliationResult['reconciliation_risk_score'] ?? 0);
 
-        $entityResult = $this->entityRelationshipRiskService->scoreEntityRelationships($companyId);
+        $entityResult = $this->entityRelationshipRiskService->scoreEntityRelationships($companyId, $businessProfileId);
         $entityRiskScore = (int) ($entityResult['entity_relationship_risk_score'] ?? 0);
 
         $overallScore = max($vendorRiskScore, $reconciliationRiskScore, $entityRiskScore);
@@ -77,6 +77,7 @@ class AggregateRiskSummaryService
 
         return [
             'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
             'overall_risk_score' => $overallScore,
             'overall_risk_level' => $this->mapRiskLevel($overallScore),
             'contributing_risk_domains' => $contributingRiskDomains,

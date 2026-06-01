@@ -26,6 +26,9 @@ class AgentToolEndpointTest extends TestCase
         config(['services.brevix_agent.api_key' => 'test-tool-key']);
 
         Schema::dropIfExists('transactions');
+        Schema::dropIfExists('business_profile_memberships');
+        Schema::dropIfExists('workspace_memberships');
+        Schema::dropIfExists('business_profiles');
         Schema::dropIfExists('users');
         Schema::dropIfExists('companies');
 
@@ -48,6 +51,7 @@ class AgentToolEndpointTest extends TestCase
         Schema::create('transactions', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->string('date')->nullable();
             $table->string('vendor_customer')->nullable();
             $table->decimal('amount', 15, 2)->nullable();
@@ -113,7 +117,7 @@ class AgentToolEndpointTest extends TestCase
     {
         [$company, $user] = $this->createCompanyUser();
 
-        $this->getJson("/api/internal/agent-tools/company/{$company->id}/transaction-detail?ids[]=" . Str::uuid())
+        $this->getJson("/api/internal/agent-tools/company/{$company->id}/transaction-detail?ids[]=".Str::uuid())
             ->assertUnauthorized();
     }
 
@@ -122,7 +126,7 @@ class AgentToolEndpointTest extends TestCase
         [$company] = $this->createCompanyUser();
 
         $this->withToken('test-tool-key')
-            ->getJson("/api/internal/agent-tools/company/{$company->id}/transaction-detail?ids[]=" . Str::uuid())
+            ->getJson("/api/internal/agent-tools/company/{$company->id}/transaction-detail?ids[]=".Str::uuid())
             ->assertForbidden();
     }
 
@@ -164,14 +168,14 @@ class AgentToolEndpointTest extends TestCase
         $txnId = (string) Str::uuid();
 
         DB::table('transactions')->insert([
-            'id'              => $txnId,
-            'company_id'      => $company->id,
-            'date'            => '2026-05-01',
+            'id' => $txnId,
+            'company_id' => $company->id,
+            'date' => '2026-05-01',
             'vendor_customer' => 'ACME Corp',
-            'amount'          => '500.00',
-            'type'            => 'expense',
-            'category'        => 'Software',
-            'anomaly_flag'    => 0,
+            'amount' => '500.00',
+            'type' => 'expense',
+            'category' => 'Software',
+            'anomaly_flag' => 0,
         ]);
 
         $response = $this->withToken('test-tool-key')
@@ -192,9 +196,9 @@ class AgentToolEndpointTest extends TestCase
         $txnId = (string) Str::uuid();
 
         DB::table('transactions')->insert([
-            'id'         => $txnId,
+            'id' => $txnId,
             'company_id' => $companyB->id,
-            'amount'     => '100.00',
+            'amount' => '100.00',
             'anomaly_flag' => 0,
         ]);
 
@@ -205,6 +209,48 @@ class AgentToolEndpointTest extends TestCase
 
         $this->assertSame(0, $response->json('found_count'));
         $this->assertEmpty($response->json('transactions'));
+    }
+
+    public function test_transaction_detail_is_scoped_to_active_business_profile(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        [$profileA, $profileB] = $this->createBusinessProfiles($company->id);
+        $txnA = (string) Str::uuid();
+        $txnB = (string) Str::uuid();
+
+        DB::table('transactions')->insert([
+            [
+                'id' => $txnA,
+                'company_id' => $company->id,
+                'business_profile_id' => $profileA,
+                'date' => '2026-05-01',
+                'vendor_customer' => 'Profile A Vendor',
+                'amount' => '500.00',
+                'anomaly_flag' => 0,
+            ],
+            [
+                'id' => $txnB,
+                'company_id' => $company->id,
+                'business_profile_id' => $profileB,
+                'date' => '2026-05-02',
+                'vendor_customer' => 'Profile B Vendor',
+                'amount' => '700.00',
+                'anomaly_flag' => 0,
+            ],
+        ]);
+
+        $response = $this->withToken('test-tool-key')
+            ->withHeaders([
+                'X-Brevix-User-Id' => $user->id,
+                'X-Brevix-Business-Profile-Id' => $profileA,
+            ])
+            ->getJson("/api/internal/agent-tools/company/{$company->id}/transaction-detail?ids[]={$txnA}&ids[]={$txnB}")
+            ->assertOk();
+
+        $this->assertSame($profileA, $response->json('business_profile_id'));
+        $this->assertSame(1, $response->json('found_count'));
+        $this->assertSame($txnA, $response->json('transactions.0.id'));
+        $this->assertSame('Profile A Vendor', $response->json('transactions.0.vendor'));
     }
 
     // ── pending-recommendations ───────────────────────────────────────────────
@@ -251,6 +297,56 @@ class AgentToolEndpointTest extends TestCase
         $this->assertIsArray($response->json('case_recommendations'));
     }
 
+    public function test_pending_recommendations_requires_profile_when_workspace_has_multiple_profiles(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $this->createBusinessProfiles($company->id);
+
+        $this->mock(AlertRecommendationService::class, function ($mock): void {
+            $mock->shouldNotReceive('getAlertRecommendations');
+        });
+        $this->mock(CaseRecommendationService::class, function ($mock): void {
+            $mock->shouldNotReceive('getCaseRecommendations');
+        });
+
+        $this->withToken('test-tool-key')
+            ->withHeaders(['X-Brevix-User-Id' => $user->id])
+            ->getJson("/api/internal/agent-tools/company/{$company->id}/pending-recommendations")
+            ->assertUnprocessable()
+            ->assertJson(['error' => 'Select an active business profile before continuing.']);
+    }
+
+    public function test_pending_recommendations_passes_active_business_profile_to_services(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        [$profileA] = $this->createBusinessProfiles($company->id);
+
+        $this->mock(AlertRecommendationService::class, function ($mock) use ($company, $profileA): void {
+            $mock->shouldReceive('getAlertRecommendations')
+                ->once()
+                ->with($company->id, $profileA)
+                ->andReturn(['recommended_alerts' => [['id' => 'alert-rec-1']]]);
+        });
+        $this->mock(CaseRecommendationService::class, function ($mock) use ($company, $profileA): void {
+            $mock->shouldReceive('getCaseRecommendations')
+                ->once()
+                ->with($company->id, $profileA)
+                ->andReturn(['case_recommendations' => [['id' => 'case-rec-1']]]);
+        });
+
+        $response = $this->withToken('test-tool-key')
+            ->withHeaders([
+                'X-Brevix-User-Id' => $user->id,
+                'X-Brevix-Business-Profile-Id' => $profileA,
+            ])
+            ->getJson("/api/internal/agent-tools/company/{$company->id}/pending-recommendations")
+            ->assertOk();
+
+        $this->assertSame($profileA, $response->json('business_profile_id'));
+        $this->assertSame('alert-rec-1', $response->json('alert_recommendations.0.id'));
+        $this->assertSame('case-rec-1', $response->json('case_recommendations.0.id'));
+    }
+
     /** @return array{0: Company, 1: User} */
     private function createCompanyUser(string $name = 'Test Co'): array
     {
@@ -259,14 +355,53 @@ class AgentToolEndpointTest extends TestCase
         $company->save();
 
         $user = new User([
-            'company_id'    => $company->id,
-            'email'         => Str::uuid() . '@example.com',
+            'company_id' => $company->id,
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
-            'role'          => 'owner',
+            'role' => 'owner',
         ]);
         $user->id = (string) Str::uuid();
         $user->save();
 
         return [$company, $user];
+    }
+
+    /** @return array{0: string, 1: string} */
+    private function createBusinessProfiles(string $companyId): array
+    {
+        Schema::create('business_profiles', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->string('name');
+            $table->boolean('is_default')->default(false);
+            $table->string('status')->default('active');
+            $table->timestamps();
+        });
+
+        $profileA = (string) Str::uuid();
+        $profileB = (string) Str::uuid();
+
+        DB::table('business_profiles')->insert([
+            [
+                'id' => $profileA,
+                'company_id' => $companyId,
+                'name' => 'Profile A',
+                'is_default' => true,
+                'status' => 'active',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => $profileB,
+                'company_id' => $companyId,
+                'name' => 'Profile B',
+                'is_default' => false,
+                'status' => 'active',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        return [$profileA, $profileB];
     }
 }

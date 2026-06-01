@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WorkspaceMembership;
+use App\Services\RexOrchestratorService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -320,6 +321,23 @@ class BusinessProfileTenancyTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'groups')
             ->assertJsonPath('groups.0.title', 'Profile A cluster');
+    }
+
+    public function test_rex_alert_route_is_profile_scoped(): void
+    {
+        [$company] = $this->createWorkspace('growth');
+        $profileA = $this->createProfile($company, 'A', isDefault: true);
+        $profileB = $this->createProfile($company, 'B');
+
+        $alertA = $this->insertAlert($company->id, $profileA->id, 'Profile A alert', 'critical', 'duplicate_invoice');
+        $this->insertAlert($company->id, $profileB->id, 'Profile B alert', 'warning', 'cash_spike');
+
+        $result = app(RexOrchestratorService::class)->handleRoute($company->id, 'alerts', $profileA->id);
+
+        $alerts = collect($result['artifacts'][0]['data']['alerts'] ?? []);
+        $this->assertCount(1, $alerts);
+        $this->assertSame($alertA, $alerts->first()->id);
+        $this->assertSame('Profile A alert', $alerts->first()->title);
     }
 
     public function test_alert_recommendations_are_profile_scoped(): void

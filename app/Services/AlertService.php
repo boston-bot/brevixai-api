@@ -41,7 +41,7 @@ class AlertService
             $query->where('rule_key', $filters['rule_key']);
         }
 
-        if (($filters['sort'] ?? 'priority') === 'priority') {
+        if (($filters['sort'] ?? 'priority') === 'priority' && Schema::hasColumn('alerts', 'priority_score')) {
             $query->orderBy('priority_score', 'desc')->orderBy('created_at', 'desc');
         } else {
             $query->orderByRaw(
@@ -200,6 +200,10 @@ class AlertService
 
     private function updateAllScores(string $companyId, ?string $businessProfileId = null): void
     {
+        if (! Schema::hasColumn('alerts', 'priority_score')) {
+            return;
+        }
+
         $openAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->where('status', 'open')
             ->select('id')
