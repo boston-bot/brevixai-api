@@ -3,9 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Alert;
-use App\Models\AgentActionApproval;
-use App\Models\AgentRun;
-use App\Models\AgentStep;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
@@ -53,7 +50,7 @@ class Phase1AgentRegressionTest extends TestCase
                         'step_name' => 'router',
                         'step_type' => 'graph_node',
                         'status' => 'completed',
-                    ]
+                    ],
                 ],
                 'errors' => [],
             ]),
@@ -244,7 +241,7 @@ class Phase1AgentRegressionTest extends TestCase
                         'label' => 'Create alert',
                         'requires_approval' => false,
                         'payload' => ['title' => 'Draft alert'],
-                    ]
+                    ],
                 ],
                 'steps' => [
                     [
@@ -252,7 +249,7 @@ class Phase1AgentRegressionTest extends TestCase
                         'step_type' => 'tool_call',
                         'status' => 'completed',
                         'output_payload' => ['tool' => 'risk_summary'],
-                    ]
+                    ],
                 ],
             ]),
         ]);
@@ -374,8 +371,9 @@ class Phase1AgentRegressionTest extends TestCase
         $this->assertArrayNotHasKey('trace', $response->json());
 
         // 2. Internal Agent Tool Service Failure
-        $this->app->instance(AgentRiskAnalysisService::class, new class extends AgentRiskAnalysisService {
-            public function riskSummary(string $companyId, ?string $period = null): array
+        $this->app->instance(AgentRiskAnalysisService::class, new class extends AgentRiskAnalysisService
+        {
+            public function riskSummary(string $companyId, ?string $period = null, ?string $businessProfileId = null): array
             {
                 throw new RuntimeException('Database connection lost or sensitive query failed.');
             }
@@ -406,7 +404,7 @@ class Phase1AgentRegressionTest extends TestCase
 
         $user = new User([
             'company_id' => $company->id,
-            'email' => Str::uuid() . '@example.com',
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
             'first_name' => 'Test',
             'last_name' => 'User',
@@ -433,6 +431,9 @@ class Phase1AgentRegressionTest extends TestCase
             'reconciliation_results',
             'transactions',
             'uploads',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

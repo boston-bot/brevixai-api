@@ -5,8 +5,8 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\Agents\AgentRiskAnalysisService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -28,6 +28,9 @@ class AgentToolAuthorizationTest extends TestCase
         Schema::dropIfExists('reconciliation_results');
         Schema::dropIfExists('all_transactions');
         Schema::dropIfExists('uploads');
+        Schema::dropIfExists('business_profile_memberships');
+        Schema::dropIfExists('workspace_memberships');
+        Schema::dropIfExists('business_profiles');
         Schema::dropIfExists('users');
         Schema::dropIfExists('companies');
 
@@ -96,8 +99,9 @@ class AgentToolAuthorizationTest extends TestCase
     {
         [$company, $user] = $this->createCompanyUser();
 
-        $this->app->instance(AgentRiskAnalysisService::class, new class extends AgentRiskAnalysisService {
-            public function riskSummary(string $companyId, ?string $period = null): array
+        $this->app->instance(AgentRiskAnalysisService::class, new class extends AgentRiskAnalysisService
+        {
+            public function riskSummary(string $companyId, ?string $period = null, ?string $businessProfileId = null): array
             {
                 throw new RuntimeException('Sensitive transaction details should not be exposed.');
             }
@@ -242,7 +246,7 @@ class AgentToolAuthorizationTest extends TestCase
 
         $user = new User([
             'company_id' => $company->id,
-            'email' => Str::uuid() . '@example.com',
+            'email' => Str::uuid().'@example.com',
             'password_hash' => Hash::make('password'),
             'first_name' => 'Test',
             'last_name' => 'User',

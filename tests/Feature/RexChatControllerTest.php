@@ -35,6 +35,9 @@ class RexChatControllerTest extends TestCase
         Schema::dropIfExists('agent_action_approvals');
         Schema::dropIfExists('agent_steps');
         Schema::dropIfExists('agent_runs');
+        Schema::dropIfExists('business_profile_memberships');
+        Schema::dropIfExists('workspace_memberships');
+        Schema::dropIfExists('business_profiles');
         Schema::dropIfExists('rex_pending_actions');
         Schema::dropIfExists('chat_usage_daily');
         Schema::dropIfExists('chat_messages');

@@ -5,21 +5,27 @@ namespace App\Services\Agents;
 use App\Models\ReconciliationDiscrepancy;
 use App\Models\Transaction;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class ReconciliationRiskScoringService
 {
     /**
      * Calculate reconciliation risk score and return structured explainable details.
      */
-    public function scoreReconciliation(string $companyId): array
+    public function scoreReconciliation(string $companyId, ?string $businessProfileId = null): array
     {
-        return Cache::remember("risk_score:reconciliation:{$companyId}", 300, function () use ($companyId): array {
-            return $this->computeReconciliation($companyId);
+        $cacheKey = $businessProfileId
+            ? "risk_score:reconciliation:{$companyId}:profile:{$businessProfileId}"
+            : "risk_score:reconciliation:{$companyId}";
+
+        return Cache::remember($cacheKey, 300, function () use ($companyId, $businessProfileId): array {
+            return $this->computeReconciliation($companyId, $businessProfileId);
         });
     }
 
-    private function computeReconciliation(string $companyId): array
+    private function computeReconciliation(string $companyId, ?string $businessProfileId = null): array
     {
         $ruleWeights = [
             'bank_ledger_mismatch' => 15,
@@ -32,18 +38,18 @@ class ReconciliationRiskScoringService
         ];
 
         // Fetch unresolved discrepancies
-        $discrepancies = ReconciliationDiscrepancy::where('company_id', $companyId)
+        $discrepancies = $this->discrepancyQuery($companyId, $businessProfileId)
             ->whereNotIn('status', ['resolved', 'ignored'])
             ->with(['bankTransaction', 'ledgerTransaction'])
             ->get();
 
         // Get latest transaction date for staleness checking
-        $latestTxnDateStr = Transaction::where('company_id', $companyId)
+        $latestTxnDateStr = $this->transactionQuery($companyId, $businessProfileId)
             ->max('date');
         $latestTxnDate = $latestTxnDateStr ? Carbon::parse($latestTxnDateStr) : Carbon::now();
 
         // Detect suspicious manual adjustments in transactions
-        $suspiciousTxns = Transaction::where('company_id', $companyId)
+        $suspiciousTxns = $this->transactionQuery($companyId, $businessProfileId)
             ->where(function ($query) {
                 $query->where('memo', 'like', '%adj%')
                     ->orWhere('memo', 'like', '%adjustment%')
@@ -59,13 +65,13 @@ class ReconciliationRiskScoringService
         // 1. Bank-to-Ledger Mismatches
         $mismatchItems = [];
         foreach ($discrepancies as $d) {
-            if ($d->category === 'missing_from_books' || 
+            if ($d->category === 'missing_from_books' ||
                 $d->reason_code === 'bank_transaction_without_ledger_match' ||
                 $d->reason_code === 'reconciliation_mismatch') {
                 $mismatchItems[] = $this->formatDiscrepancy($d);
             }
         }
-        if (!empty($mismatchItems)) {
+        if (! empty($mismatchItems)) {
             $triggeredRules[] = [
                 'rule_key' => 'bank_ledger_mismatch',
                 'name' => 'Bank-to-Ledger Mismatches',
@@ -93,7 +99,7 @@ class ReconciliationRiskScoringService
                 $depositMismatches[] = $this->formatDiscrepancy($d);
             }
         }
-        if (!empty($depositMismatches)) {
+        if (! empty($depositMismatches)) {
             $triggeredRules[] = [
                 'rule_key' => 'unmatched_deposits',
                 'name' => 'Unmatched Deposits',
@@ -121,7 +127,7 @@ class ReconciliationRiskScoringService
                 $withdrawalMismatches[] = $this->formatDiscrepancy($d);
             }
         }
-        if (!empty($withdrawalMismatches)) {
+        if (! empty($withdrawalMismatches)) {
             $triggeredRules[] = [
                 'rule_key' => 'unmatched_withdrawals',
                 'name' => 'Unmatched Withdrawals',
@@ -140,7 +146,7 @@ class ReconciliationRiskScoringService
                 $duplicateEntries[] = $this->formatDiscrepancy($d);
             }
         }
-        if (!empty($duplicateEntries)) {
+        if (! empty($duplicateEntries)) {
             $triggeredRules[] = [
                 'rule_key' => 'duplicate_ledger',
                 'name' => 'Duplicate Ledger Entries',
@@ -176,7 +182,7 @@ class ReconciliationRiskScoringService
                 $staleItems[] = $this->formatDiscrepancy($d);
             }
         }
-        if (!empty($staleItems)) {
+        if (! empty($staleItems)) {
             $triggeredRules[] = [
                 'rule_key' => 'stale_unreconciled',
                 'name' => 'Stale Unreconciled Items',
@@ -191,14 +197,14 @@ class ReconciliationRiskScoringService
         // 6. Amount/Date Variance
         $varianceItems = [];
         foreach ($discrepancies as $d) {
-            if ($d->category === 'amount_mismatch' || 
-                $d->category === 'date_mismatch' || 
-                $d->reason_code === 'amount_variance' || 
+            if ($d->category === 'amount_mismatch' ||
+                $d->category === 'date_mismatch' ||
+                $d->reason_code === 'amount_variance' ||
                 $d->reason_code === 'date_variance') {
                 $varianceItems[] = $this->formatDiscrepancy($d);
             }
         }
-        if (!empty($varianceItems)) {
+        if (! empty($varianceItems)) {
             $triggeredRules[] = [
                 'rule_key' => 'amount_date_variance',
                 'name' => 'Amount/Date Variance',
@@ -223,13 +229,13 @@ class ReconciliationRiskScoringService
                 'id' => $t->id,
                 'date' => $t->date?->format('Y-m-d') ?: $t->date,
                 'vendor' => $t->vendor_customer ?: 'Unknown',
-                'amount' => (float)$t->amount,
+                'amount' => (float) $t->amount,
                 'memo' => $t->memo,
                 'category' => $t->category,
                 'is_direct_transaction' => true,
             ];
         }
-        if (!empty($manualAdjustments)) {
+        if (! empty($manualAdjustments)) {
             $triggeredRules[] = [
                 'rule_key' => 'suspicious_manual_adjustment',
                 'name' => 'Suspicious Manual Adjustments',
@@ -270,6 +276,7 @@ class ReconciliationRiskScoringService
 
         return [
             'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
             'reconciliation_risk_score' => $score,
             'risk_level' => $riskLevel,
             'triggered_rules' => $triggeredRules,
@@ -287,7 +294,7 @@ class ReconciliationRiskScoringService
         return [
             'id' => $d->id,
             'run_id' => $d->run_id,
-            'amount' => (float)$d->amount,
+            'amount' => (float) $d->amount,
             'category' => $d->category,
             'reason_code' => $d->reason_code,
             'risk_level' => $d->risk_level,
@@ -298,5 +305,23 @@ class ReconciliationRiskScoringService
             'ledger_txn_id' => $d->ledger_txn_id,
             'created_at' => $d->created_at?->toIso8601String(),
         ];
+    }
+
+    private function discrepancyQuery(string $companyId, ?string $businessProfileId): Builder
+    {
+        return ReconciliationDiscrepancy::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('reconciliation_discrepancies', 'business_profile_id'),
+                fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
+            );
+    }
+
+    private function transactionQuery(string $companyId, ?string $businessProfileId): Builder
+    {
+        return Transaction::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('transactions', 'business_profile_id'),
+                fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
+            );
     }
 }
