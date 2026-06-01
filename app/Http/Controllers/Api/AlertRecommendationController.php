@@ -12,6 +12,7 @@ use App\Services\RecommendationReviewAuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Throwable;
 
@@ -25,9 +26,9 @@ class AlertRecommendationController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $validated = $request->validate([
@@ -47,7 +48,11 @@ class AlertRecommendationController extends Controller
         $offset = (int) ($validated['offset'] ?? 0);
 
         $query = AlertRecommendation::with('alert')
-            ->where('company_id', $companyId);
+            ->where('company_id', $context->companyId)
+            ->when(
+                $context->businessProfileId && Schema::hasColumn('alert_recommendations', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $context->businessProfileId),
+            );
 
         if ($status !== 'all') {
             $query->where('status', $status);
@@ -72,14 +77,18 @@ class AlertRecommendationController extends Controller
 
     public function show(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
             $recommendation = AlertRecommendation::with('alert')
-                ->where('company_id', $companyId)
+                ->where('company_id', $context->companyId)
+                ->when(
+                    $context->businessProfileId && Schema::hasColumn('alert_recommendations', 'business_profile_id'),
+                    fn ($query) => $query->where('business_profile_id', $context->businessProfileId),
+                )
                 ->where('id', $id)
                 ->first();
         } catch (Throwable $e) {
@@ -92,7 +101,7 @@ class AlertRecommendationController extends Controller
 
         try {
             $this->reviewAuditService->record(
-                companyId: $companyId,
+                companyId: $context->companyId,
                 recommendationType: RecommendationReviewEvent::TYPE_ALERT,
                 recommendationId: $recommendation->id,
                 eventType: RecommendationReviewEvent::EVENT_VIEWED,
@@ -101,13 +110,15 @@ class AlertRecommendationController extends Controller
                 metadata: [
                     'source' => 'api',
                 ],
+                businessProfileId: $context->businessProfileId,
             );
 
             $payload = $recommendation->toArray();
             $payload['review_events'] = $this->reviewAuditService->history(
-                $companyId,
+                $context->companyId,
                 RecommendationReviewEvent::TYPE_ALERT,
                 $recommendation->id,
+                $context->businessProfileId,
             );
         } catch (Throwable $e) {
             return $this->safeReviewError($e, 'alert_recommendation_history');
@@ -118,17 +129,18 @@ class AlertRecommendationController extends Controller
 
     public function approve(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
             $result = $this->reviewService->approve(
-                $companyId,
+                $context->companyId,
                 $request->user()->id,
                 $id,
                 RecommendationReviewEvent::ACTOR_USER,
+                $context->businessProfileId,
             );
         } catch (AlertRecommendationReviewConflict $e) {
             return $this->reviewConflict($e);
@@ -145,9 +157,9 @@ class AlertRecommendationController extends Controller
 
     public function dismiss(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $validated = $request->validate([
@@ -156,11 +168,12 @@ class AlertRecommendationController extends Controller
 
         try {
             $recommendation = $this->reviewService->dismiss(
-                $companyId,
+                $context->companyId,
                 $request->user()->id,
                 $id,
                 $validated['review_note'] ?? null,
                 RecommendationReviewEvent::ACTOR_USER,
+                $context->businessProfileId,
             );
         } catch (AlertRecommendationReviewConflict $e) {
             return $this->reviewConflict($e);
@@ -177,13 +190,16 @@ class AlertRecommendationController extends Controller
 
     public function run(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
-            $result = $this->alertRecommendationService->getAlertRecommendations($companyId);
+            $result = $this->alertRecommendationService->getAlertRecommendations(
+                $context->companyId,
+                $context->businessProfileId,
+            );
         } catch (Throwable $e) {
             return $this->safeReviewError($e, 'alert_recommendation_run');
         }

@@ -9,11 +9,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class AlertGroup extends Model
 {
     protected $keyType = 'string';
+
     public $incrementing = false;
+
     public $timestamps = false;
 
     protected $fillable = [
-        'company_id', 'title', 'alert_count', 'max_severity', 'total_impact',
+        'company_id', 'business_profile_id', 'title', 'alert_count', 'max_severity', 'total_impact',
     ];
 
     protected $casts = [

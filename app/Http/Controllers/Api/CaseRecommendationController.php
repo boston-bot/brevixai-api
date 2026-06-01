@@ -12,6 +12,7 @@ use App\Services\RecommendationReviewAuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Throwable;
 
@@ -25,9 +26,9 @@ class CaseRecommendationController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $validated = $request->validate([
@@ -47,7 +48,11 @@ class CaseRecommendationController extends Controller
         $offset = (int) ($validated['offset'] ?? 0);
 
         $query = CaseRecommendation::with('auditCase')
-            ->where('company_id', $companyId);
+            ->where('company_id', $context->companyId)
+            ->when(
+                $context->businessProfileId && Schema::hasColumn('case_recommendations', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $context->businessProfileId),
+            );
 
         if ($status !== 'all') {
             $query->where('status', $status);
@@ -75,14 +80,18 @@ class CaseRecommendationController extends Controller
 
     public function show(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
             $recommendation = CaseRecommendation::with('auditCase')
-                ->where('company_id', $companyId)
+                ->where('company_id', $context->companyId)
+                ->when(
+                    $context->businessProfileId && Schema::hasColumn('case_recommendations', 'business_profile_id'),
+                    fn ($query) => $query->where('business_profile_id', $context->businessProfileId),
+                )
                 ->where('id', $id)
                 ->first();
         } catch (Throwable $e) {
@@ -95,7 +104,7 @@ class CaseRecommendationController extends Controller
 
         try {
             $this->reviewAuditService->record(
-                companyId: $companyId,
+                companyId: $context->companyId,
                 recommendationType: RecommendationReviewEvent::TYPE_CASE,
                 recommendationId: $recommendation->id,
                 eventType: RecommendationReviewEvent::EVENT_VIEWED,
@@ -104,13 +113,15 @@ class CaseRecommendationController extends Controller
                 metadata: [
                     'source' => 'api',
                 ],
+                businessProfileId: $context->businessProfileId,
             );
 
             $payload = $this->caseRecommendationService->recommendationPayload($recommendation);
             $payload['review_events'] = $this->reviewAuditService->history(
-                $companyId,
+                $context->companyId,
                 RecommendationReviewEvent::TYPE_CASE,
                 $recommendation->id,
+                $context->businessProfileId,
             );
         } catch (Throwable $e) {
             return $this->safeReviewError($e, 'case_recommendation_history');
@@ -123,17 +134,18 @@ class CaseRecommendationController extends Controller
 
     public function approve(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         try {
             $result = $this->reviewService->approve(
-                $companyId,
+                $context->companyId,
                 $request->user()->id,
                 $id,
                 RecommendationReviewEvent::ACTOR_USER,
+                $context->businessProfileId,
             );
         } catch (CaseRecommendationReviewConflict $e) {
             return $this->reviewConflict($e);
@@ -150,9 +162,9 @@ class CaseRecommendationController extends Controller
 
     public function dismiss(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $validated = $request->validate([
@@ -161,11 +173,12 @@ class CaseRecommendationController extends Controller
 
         try {
             $result = $this->reviewService->dismiss(
-                $companyId,
+                $context->companyId,
                 $request->user()->id,
                 $id,
                 $validated['review_note'] ?? null,
                 RecommendationReviewEvent::ACTOR_USER,
+                $context->businessProfileId,
             );
         } catch (CaseRecommendationReviewConflict $e) {
             return $this->reviewConflict($e);

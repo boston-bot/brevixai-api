@@ -27,6 +27,7 @@ class CaseRecommendation extends Model
 
     protected $fillable = [
         'company_id',
+        'business_profile_id',
         'case_type',
         'severity',
         'title',

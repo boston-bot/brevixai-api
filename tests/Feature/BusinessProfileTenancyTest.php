@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\AlertRecommendation;
 use App\Models\BusinessProfile;
+use App\Models\CaseRecommendation;
 use App\Models\Company;
 use App\Models\Subscription;
 use App\Models\User;
@@ -25,6 +27,12 @@ class BusinessProfileTenancyTest extends TestCase
         Queue::fake();
 
         foreach ([
+            'recommendation_review_events',
+            'audit_case_events',
+            'audit_cases',
+            'case_recommendations',
+            'alert_recommendations',
+            'alert_groups',
             'alerts',
             'all_transactions',
             'chat_usage_daily',
@@ -284,6 +292,160 @@ class BusinessProfileTenancyTest extends TestCase
             ->assertJsonPath('trailingMonths.0.spend', 150);
     }
 
+    public function test_alerts_are_profile_scoped(): void
+    {
+        [$company, $owner] = $this->createWorkspace('growth');
+        $profileA = $this->createProfile($company, 'A', isDefault: true);
+        $profileB = $this->createProfile($company, 'B');
+
+        $alertA = $this->insertAlert($company->id, $profileA->id, 'Profile A alert', 'critical', 'duplicate_invoice');
+        $alertB = $this->insertAlert($company->id, $profileB->id, 'Profile B alert', 'warning', 'cash_spike');
+        $this->insertAlertGroup($company->id, $profileA->id, 'Profile A cluster');
+        $this->insertAlertGroup($company->id, $profileB->id, 'Profile B cluster');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/alerts?skipCompute=1', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('alerts.0.id', $alertA);
+
+        $this->getJson("/api/alerts/{$alertB}", ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound();
+
+        $this->patchJson("/api/alerts/{$alertB}", ['status' => 'reviewed'], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound();
+
+        $this->getJson('/api/alerts/groups', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonCount(1, 'groups')
+            ->assertJsonPath('groups.0.title', 'Profile A cluster');
+    }
+
+    public function test_alert_recommendations_are_profile_scoped(): void
+    {
+        [$company, $owner] = $this->createWorkspace('growth');
+        $profileA = $this->createProfile($company, 'A', isDefault: true);
+        $profileB = $this->createProfile($company, 'B');
+
+        $recommendationA = $this->insertAlertRecommendation($company->id, $profileA->id, 'Review profile A vendor risk');
+        $recommendationB = $this->insertAlertRecommendation($company->id, $profileB->id, 'Review profile B vendor risk');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/alert-recommendations', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonCount(1, 'recommendations')
+            ->assertJsonPath('recommendations.0.id', $recommendationA);
+
+        $this->getJson("/api/alert-recommendations/{$recommendationB}", ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound();
+
+        $this->postJson("/api/alert-recommendations/{$recommendationB}/approve", [], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound();
+
+        $this->postJson("/api/alert-recommendations/{$recommendationA}/approve", [], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('alert.business_profile_id', $profileA->id);
+
+        $this->assertDatabaseHas('alerts', [
+            'alert_recommendation_id' => $recommendationA,
+            'business_profile_id' => $profileA->id,
+        ]);
+        $this->assertDatabaseHas('recommendation_review_events', [
+            'recommendation_id' => $recommendationA,
+            'business_profile_id' => $profileA->id,
+            'event_type' => 'approved',
+        ]);
+    }
+
+    public function test_cases_are_profile_scoped_and_validate_linked_records(): void
+    {
+        [$company, $owner] = $this->createWorkspace('growth');
+        $profileA = $this->createProfile($company, 'A', isDefault: true);
+        $profileB = $this->createProfile($company, 'B');
+
+        $alertA = $this->insertAlert($company->id, $profileA->id, 'Profile A alert', 'critical', 'duplicate_invoice');
+        $alertB = $this->insertAlert($company->id, $profileB->id, 'Profile B alert', 'warning', 'cash_spike');
+        $transactionA = $this->insertTransaction($company->id, $profileA->id, 'Profile A Vendor', 250.00);
+        $transactionB = $this->insertTransaction($company->id, $profileB->id, 'Profile B Vendor', 999.00);
+
+        Sanctum::actingAs($owner);
+
+        $this->postJson('/api/cases', [
+            'title' => 'Invalid alert case',
+            'alert_ids' => [$alertB],
+        ], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound()
+            ->assertJsonPath('error', 'Linked alert not found');
+
+        $this->postJson('/api/cases', [
+            'title' => 'Invalid transaction case',
+            'transaction_ids' => [$transactionB],
+        ], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound()
+            ->assertJsonPath('error', 'Linked transaction not found');
+
+        $caseId = $this->postJson('/api/cases', [
+            'title' => 'Profile A case',
+            'alert_ids' => [$alertA],
+            'transaction_ids' => [$transactionA],
+        ], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertCreated()
+            ->assertJsonPath('case.business_profile_id', $profileA->id)
+            ->json('case.id');
+
+        $this->getJson('/api/cases', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonCount(1, 'cases')
+            ->assertJsonPath('cases.0.id', $caseId);
+
+        $this->getJson("/api/cases/{$caseId}", ['X-Brevix-Business-Profile-Id' => $profileB->id])
+            ->assertNotFound();
+
+        $this->postJson("/api/cases/{$caseId}/alerts", ['alert_id' => $alertB], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound()
+            ->assertJsonPath('error', 'Alert not found');
+
+        $this->getJson("/api/cases/{$caseId}/summary", ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('stats.alertCount', 1)
+            ->assertJsonPath('stats.transactionCount', 1)
+            ->assertJsonPath('stats.totalImpact', 250);
+    }
+
+    public function test_case_recommendations_are_profile_scoped(): void
+    {
+        [$company, $owner] = $this->createWorkspace('growth');
+        $profileA = $this->createProfile($company, 'A', isDefault: true);
+        $profileB = $this->createProfile($company, 'B');
+
+        $recommendationA = $this->insertCaseRecommendation($company->id, $profileA->id, 'Investigate profile A risk');
+        $recommendationB = $this->insertCaseRecommendation($company->id, $profileB->id, 'Investigate profile B risk');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/case-recommendations', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonCount(1, 'recommendations')
+            ->assertJsonPath('recommendations.0.id', $recommendationA);
+
+        $this->getJson("/api/case-recommendations/{$recommendationB}", ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound();
+
+        $this->postJson("/api/case-recommendations/{$recommendationB}/approve", [], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertNotFound();
+
+        $this->postJson("/api/case-recommendations/{$recommendationA}/approve", [], ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('case.business_profile_id', $profileA->id);
+
+        $this->assertDatabaseHas('audit_cases', [
+            'case_recommendation_id' => $recommendationA,
+            'business_profile_id' => $profileA->id,
+        ]);
+    }
+
     private function createSchema(): void
     {
         Schema::create('all_transactions', function (Blueprint $table): void {
@@ -293,6 +455,10 @@ class BusinessProfileTenancyTest extends TestCase
             $table->date('date')->nullable();
             $table->text('vendor_customer')->nullable();
             $table->decimal('amount', 12, 2)->default(0);
+            $table->text('category')->nullable();
+            $table->text('type')->nullable();
+            $table->text('anomaly_reason')->nullable();
+            $table->text('payment_method')->nullable();
             $table->boolean('anomaly_flag')->default(false);
         });
 
@@ -439,12 +605,117 @@ class BusinessProfileTenancyTest extends TestCase
             $table->uuid('id')->primary();
             $table->uuid('company_id');
             $table->uuid('business_profile_id')->nullable();
+            $table->uuid('group_id')->nullable();
+            $table->uuid('alert_recommendation_id')->nullable();
             $table->string('title');
             $table->text('detail')->nullable();
             $table->string('severity');
             $table->string('status')->default('open');
             $table->string('rule_key')->nullable();
+            $table->json('evidence')->nullable();
+            $table->json('reason_codes')->nullable();
+            $table->string('source_system')->nullable();
+            $table->uuid('source_recommendation_id')->nullable();
+            $table->decimal('confidence_score', 5, 2)->nullable();
+            $table->json('evidence_refs')->nullable();
+            $table->json('comparison_window')->nullable();
+            $table->integer('priority_score')->default(50);
+            $table->uuid('reviewed_by')->nullable();
+            $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
+        });
+
+        Schema::create('alert_groups', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->string('title');
+            $table->integer('alert_count')->default(0);
+            $table->string('max_severity')->default('info');
+            $table->decimal('total_impact', 12, 2)->default(0);
+            $table->timestamps();
+        });
+
+        Schema::create('alert_recommendations', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->string('source_risk_domain');
+            $table->string('alert_type');
+            $table->string('severity');
+            $table->string('title');
+            $table->text('summary');
+            $table->json('evidence')->nullable();
+            $table->json('source_rule_ids')->nullable();
+            $table->decimal('confidence_score', 5, 2)->default(0);
+            $table->string('status')->default(AlertRecommendation::STATUS_PENDING_REVIEW);
+            $table->uuid('reviewed_by_user_id')->nullable();
+            $table->timestamp('reviewed_at')->nullable();
+            $table->text('review_note')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('case_recommendations', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->string('case_type');
+            $table->string('severity');
+            $table->string('title');
+            $table->text('summary');
+            $table->json('source_risk_domains')->nullable();
+            $table->json('related_alert_recommendation_ids')->nullable();
+            $table->json('evidence')->nullable();
+            $table->decimal('confidence_score', 5, 2)->default(0);
+            $table->boolean('requires_human_review')->default(true);
+            $table->boolean('can_auto_create')->default(false);
+            $table->string('status')->default(CaseRecommendation::STATUS_PENDING_REVIEW);
+            $table->uuid('reviewed_by_user_id')->nullable();
+            $table->timestamp('reviewed_at')->nullable();
+            $table->text('review_note')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('audit_cases', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->uuid('case_recommendation_id')->nullable();
+            $table->string('title');
+            $table->text('description')->nullable();
+            $table->string('status')->default('open');
+            $table->string('severity')->default('warning');
+            $table->uuid('assigned_to')->nullable();
+            $table->uuid('created_by');
+            $table->text('resolution_notes')->nullable();
+            $table->timestamp('resolved_at')->nullable();
+            $table->text('alert_ids')->default('{}');
+            $table->text('transaction_ids')->default('{}');
+            $table->timestamps();
+        });
+
+        Schema::create('audit_case_events', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('case_id');
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->uuid('user_id')->nullable();
+            $table->string('event_type');
+            $table->json('payload')->nullable();
+            $table->timestamp('created_at')->useCurrent();
+        });
+
+        Schema::create('recommendation_review_events', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->string('recommendation_type');
+            $table->uuid('recommendation_id');
+            $table->string('event_type');
+            $table->string('actor_type');
+            $table->uuid('actor_id')->nullable();
+            $table->json('event_metadata')->nullable();
+            $table->timestamp('created_at')->useCurrent();
         });
     }
 
@@ -507,9 +778,11 @@ class BusinessProfileTenancyTest extends TestCase
         string $vendor,
         float $amount,
         bool $anomaly = false,
-    ): void {
+    ): string {
+        $id = (string) Str::uuid();
+
         DB::table('all_transactions')->insert([
-            'id' => (string) Str::uuid(),
+            'id' => $id,
             'company_id' => $companyId,
             'business_profile_id' => $businessProfileId,
             'date' => now()->startOfMonth()->addDays(2)->toDateString(),
@@ -517,12 +790,16 @@ class BusinessProfileTenancyTest extends TestCase
             'amount' => $amount,
             'anomaly_flag' => $anomaly,
         ]);
+
+        return $id;
     }
 
-    private function insertAlert(string $companyId, string $businessProfileId, string $title, string $severity, string $ruleKey): void
+    private function insertAlert(string $companyId, string $businessProfileId, string $title, string $severity, string $ruleKey): string
     {
+        $id = (string) Str::uuid();
+
         DB::table('alerts')->insert([
-            'id' => (string) Str::uuid(),
+            'id' => $id,
             'company_id' => $companyId,
             'business_profile_id' => $businessProfileId,
             'title' => $title,
@@ -530,8 +807,77 @@ class BusinessProfileTenancyTest extends TestCase
             'severity' => $severity,
             'status' => 'open',
             'rule_key' => $ruleKey,
+            'evidence' => json_encode(['vendors' => ['Profile Vendor'], 'amounts' => [100.0]]),
+            'priority_score' => 50,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        return $id;
+    }
+
+    private function insertAlertGroup(string $companyId, string $businessProfileId, string $title): void
+    {
+        DB::table('alert_groups')->insert([
+            'id' => (string) Str::uuid(),
+            'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
+            'title' => $title,
+            'alert_count' => 1,
+            'max_severity' => 'critical',
+            'total_impact' => 100,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function insertAlertRecommendation(string $companyId, string $businessProfileId, string $title): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('alert_recommendations')->insert([
+            'id' => $id,
+            'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
+            'source_risk_domain' => 'vendor_risk',
+            'alert_type' => 'vendor_risk_review',
+            'severity' => 'warning',
+            'title' => $title,
+            'summary' => $title.' summary',
+            'evidence' => json_encode(['flagged_vendor_count' => 1]),
+            'source_rule_ids' => json_encode(['threshold_splitting']),
+            'confidence_score' => 0.90,
+            'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
+    }
+
+    private function insertCaseRecommendation(string $companyId, string $businessProfileId, string $title): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('case_recommendations')->insert([
+            'id' => $id,
+            'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
+            'case_type' => 'vendor_payment_reconciliation_investigation',
+            'severity' => 'high',
+            'title' => $title,
+            'summary' => $title.' summary',
+            'source_risk_domains' => json_encode(['vendor_risk', 'reconciliation_risk']),
+            'related_alert_recommendation_ids' => json_encode([]),
+            'evidence' => json_encode(['risk_score' => 80]),
+            'confidence_score' => 0.85,
+            'requires_human_review' => true,
+            'can_auto_create' => false,
+            'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
     }
 }

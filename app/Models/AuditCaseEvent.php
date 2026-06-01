@@ -17,7 +17,7 @@ class AuditCaseEvent extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'case_id', 'company_id', 'user_id', 'event_type', 'payload',
+        'case_id', 'company_id', 'business_profile_id', 'user_id', 'event_type', 'payload',
     ];
 
     protected $casts = [
