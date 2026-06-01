@@ -25,6 +25,8 @@ class BusinessProfileTenancyTest extends TestCase
         Queue::fake();
 
         foreach ([
+            'alerts',
+            'all_transactions',
             'chat_usage_daily',
             'chat_messages',
             'chat_sessions',
@@ -201,8 +203,99 @@ class BusinessProfileTenancyTest extends TestCase
             ->assertJsonPath('0.id', $sessionA);
     }
 
+    public function test_dashboard_and_analytics_require_profile_context_for_multi_profile_workspace(): void
+    {
+        [$company, $owner] = $this->createWorkspace('growth');
+        $this->createProfile($company, 'A', isDefault: true);
+        $this->createProfile($company, 'B');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/dashboard/summary')
+            ->assertStatus(422)
+            ->assertJsonPath('error', 'Select an active business profile before continuing.');
+
+        $this->getJson('/api/analytics/summary')
+            ->assertStatus(422)
+            ->assertJsonPath('error', 'Select an active business profile before continuing.');
+    }
+
+    public function test_dashboard_and_analytics_use_single_profile_fallback(): void
+    {
+        [$company, $owner] = $this->createWorkspace('starter');
+        $profile = $this->createProfile($company, 'Default Business', isDefault: true);
+
+        $this->insertTransaction($company->id, $profile->id, 'Fallback Vendor', 125.25);
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/dashboard/summary')
+            ->assertOk()
+            ->assertJsonPath('stats.totalTransactions', 1)
+            ->assertJsonPath('stats.vendorsMonitored', 1)
+            ->assertJsonPath('stats.amountReviewed', 125.25);
+
+        $this->getJson('/api/analytics/summary')
+            ->assertOk()
+            ->assertJsonPath('transactionCount.value', 1)
+            ->assertJsonPath('totalSpend.value', 125.25);
+    }
+
+    public function test_dashboard_and_analytics_are_profile_scoped(): void
+    {
+        [$company, $owner] = $this->createWorkspace('growth');
+        $profileA = $this->createProfile($company, 'A', isDefault: true);
+        $profileB = $this->createProfile($company, 'B');
+
+        $this->insertTransaction($company->id, $profileA->id, 'Profile A Vendor', 100.00);
+        $this->insertTransaction($company->id, $profileA->id, 'Profile A Vendor', 50.00, anomaly: true);
+        $this->insertTransaction($company->id, $profileB->id, 'Profile B Vendor', 999.00, anomaly: true);
+
+        $this->insertAlert($company->id, $profileA->id, 'Profile A Finding', 'critical', 'duplicate_invoice');
+        $this->insertAlert($company->id, $profileB->id, 'Profile B Finding', 'warning', 'cash_spike');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/dashboard/summary', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('stats.totalTransactions', 2)
+            ->assertJsonPath('stats.flaggedAlerts', 1)
+            ->assertJsonPath('stats.vendorsMonitored', 1)
+            ->assertJsonPath('stats.amountReviewed', 150)
+            ->assertJsonPath('riskScore', 20)
+            ->assertJsonPath('recentAlerts.0.title', 'Profile A Finding')
+            ->assertJsonPath('alertBreakdown.Duplicate Invoice', 1);
+
+        $this->getJson('/api/analytics/summary', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('totalSpend.value', 150)
+            ->assertJsonPath('transactionCount.value', 2)
+            ->assertJsonPath('flaggedAmount.value', 50);
+
+        $this->getJson('/api/analytics/vendors?limit=1', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('0.name', 'Profile A Vendor')
+            ->assertJsonPath('0.amount', 150)
+            ->assertJsonPath('0.count', 2);
+
+        $this->getJson('/api/analytics/cash-flow', ['X-Brevix-Business-Profile-Id' => $profileA->id])
+            ->assertOk()
+            ->assertJsonPath('monthlyBurn', 150)
+            ->assertJsonPath('trailingMonths.0.spend', 150);
+    }
+
     private function createSchema(): void
     {
+        Schema::create('all_transactions', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->date('date')->nullable();
+            $table->text('vendor_customer')->nullable();
+            $table->decimal('amount', 12, 2)->default(0);
+            $table->boolean('anomaly_flag')->default(false);
+        });
+
         Schema::create('companies', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('name');
@@ -341,6 +434,18 @@ class BusinessProfileTenancyTest extends TestCase
             $table->integer('message_count')->default(0);
             $table->timestamps();
         });
+
+        Schema::create('alerts', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->string('title');
+            $table->text('detail')->nullable();
+            $table->string('severity');
+            $table->string('status')->default('open');
+            $table->string('rule_key')->nullable();
+            $table->timestamps();
+        });
     }
 
     /** @return array{0: Company, 1: User} */
@@ -394,5 +499,39 @@ class BusinessProfileTenancyTest extends TestCase
         $user->save();
 
         return $user;
+    }
+
+    private function insertTransaction(
+        string $companyId,
+        string $businessProfileId,
+        string $vendor,
+        float $amount,
+        bool $anomaly = false,
+    ): void {
+        DB::table('all_transactions')->insert([
+            'id' => (string) Str::uuid(),
+            'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
+            'date' => now()->startOfMonth()->addDays(2)->toDateString(),
+            'vendor_customer' => $vendor,
+            'amount' => $amount,
+            'anomaly_flag' => $anomaly,
+        ]);
+    }
+
+    private function insertAlert(string $companyId, string $businessProfileId, string $title, string $severity, string $ruleKey): void
+    {
+        DB::table('alerts')->insert([
+            'id' => (string) Str::uuid(),
+            'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
+            'title' => $title,
+            'detail' => $title.' detail',
+            'severity' => $severity,
+            'status' => 'open',
+            'rule_key' => $ruleKey,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 }
