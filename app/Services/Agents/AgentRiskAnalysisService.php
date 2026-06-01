@@ -5,14 +5,21 @@ namespace App\Services\Agents;
 use App\Models\Alert;
 use App\Models\ReconciliationDiscrepancy;
 use App\Models\Transaction;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
 class AgentRiskAnalysisService
 {
-    public function riskSummary(string $companyId, ?string $period = null): array
+    public function riskSummary(string $companyId, ?string $period = null, ?string $businessProfileId = null): array
     {
-        $alerts = Alert::where('company_id', $companyId)
-            ->where('status', 'open')
-            ->orderBy('priority_score', 'desc')
+        $alertQuery = $this->alertQuery($companyId, $businessProfileId)
+            ->where('status', 'open');
+
+        if (Schema::hasColumn('alerts', 'priority_score')) {
+            $alertQuery->orderBy('priority_score', 'desc');
+        }
+
+        $alerts = $alertQuery
             ->orderBy('created_at', 'desc')
             ->limit(10)
             ->get();
@@ -23,21 +30,22 @@ class AgentRiskAnalysisService
         $riskScore = min(100, ($criticalCount * 20) + ($warningCount * 10) + ($infoCount * 4));
 
         $aggregateService = app(AggregateRiskSummaryService::class);
-        $aggregateResult = $aggregateService->getAggregateRiskSummary($companyId);
+        $aggregateResult = $aggregateService->getAggregateRiskSummary($companyId, $businessProfileId);
 
         $alertRecommendationService = app(AlertRecommendationService::class);
-        $alertRecommendations = $alertRecommendationService->getAlertRecommendations($companyId);
+        $alertRecommendations = $alertRecommendationService->getAlertRecommendations($companyId, $businessProfileId);
 
         return [
             'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
             'risk_score' => $riskScore,
             'risk_level' => $this->riskLevel($riskScore),
             'period' => $period ?: now()->format('Y-m'),
             'top_drivers' => $alerts->map(fn (Alert $alert): array => $this->alertDriver($alert))->values()->all(),
             'stats' => [
-                'totalTransactions' => Transaction::where('company_id', $companyId)->count(),
+                'totalTransactions' => $this->transactionQuery($companyId, $businessProfileId)->count(),
                 'flaggedAlerts' => $alerts->count(),
-                'reconciliationMismatches' => ReconciliationDiscrepancy::where('company_id', $companyId)
+                'reconciliationMismatches' => $this->reconciliationDiscrepancyQuery($companyId, $businessProfileId)
                     ->whereNotIn('status', ['resolved', 'ignored'])
                     ->count(),
             ],
@@ -102,5 +110,32 @@ class AgentRiskAnalysisService
             'warning' => 'medium',
             default => 'info',
         };
+    }
+
+    private function alertQuery(string $companyId, ?string $businessProfileId): Builder
+    {
+        return Alert::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
+                fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
+            );
+    }
+
+    private function transactionQuery(string $companyId, ?string $businessProfileId): Builder
+    {
+        return Transaction::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('transactions', 'business_profile_id'),
+                fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
+            );
+    }
+
+    private function reconciliationDiscrepancyQuery(string $companyId, ?string $businessProfileId): Builder
+    {
+        return ReconciliationDiscrepancy::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('reconciliation_discrepancies', 'business_profile_id'),
+                fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
+            );
     }
 }

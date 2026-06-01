@@ -98,6 +98,7 @@ class RecommendationReviewAuditService
                 'id' => $event->id,
                 'recommendation_type' => $event->recommendation_type,
                 'recommendation_id' => $event->recommendation_id,
+                'business_profile_id' => $event->business_profile_id ?? null,
                 'event_type' => $event->event_type,
                 'actor_type' => $event->actor_type,
                 'actor_id' => $event->actor_id,

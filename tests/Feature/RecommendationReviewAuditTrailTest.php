@@ -336,7 +336,7 @@ class RecommendationReviewAuditTrailTest extends TestCase
         {
             public function __construct(private readonly array $scores) {}
 
-            public function scoreAllVendors(string $companyId): array
+            public function scoreAllVendors(string $companyId, ?string $businessProfileId = null): array
             {
                 return $this->scores;
             }
@@ -346,9 +346,9 @@ class RecommendationReviewAuditTrailTest extends TestCase
         {
             public function __construct(private readonly array $risk) {}
 
-            public function scoreReconciliation(string $companyId): array
+            public function scoreReconciliation(string $companyId, ?string $businessProfileId = null): array
             {
-                return array_merge(['company_id' => $companyId], $this->risk);
+                return array_merge(['company_id' => $companyId, 'business_profile_id' => $businessProfileId], $this->risk);
             }
         });
 
@@ -356,9 +356,9 @@ class RecommendationReviewAuditTrailTest extends TestCase
         {
             public function __construct(private readonly array $risk) {}
 
-            public function scoreEntityRelationships(string $companyId): array
+            public function scoreEntityRelationships(string $companyId, ?string $businessProfileId = null): array
             {
-                return array_merge(['company_id' => $companyId], $this->risk);
+                return array_merge(['company_id' => $companyId, 'business_profile_id' => $businessProfileId], $this->risk);
             }
         });
 
@@ -366,9 +366,9 @@ class RecommendationReviewAuditTrailTest extends TestCase
         {
             public function __construct(private readonly array $summary) {}
 
-            public function getAggregateRiskSummary(string $companyId): array
+            public function getAggregateRiskSummary(string $companyId, ?string $businessProfileId = null): array
             {
-                return array_merge(['company_id' => $companyId], $this->summary);
+                return array_merge(['company_id' => $companyId, 'business_profile_id' => $businessProfileId], $this->summary);
             }
         });
 
@@ -462,6 +462,9 @@ class RecommendationReviewAuditTrailTest extends TestCase
             'case_recommendations',
             'alert_recommendations',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

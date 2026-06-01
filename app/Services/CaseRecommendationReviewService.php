@@ -89,6 +89,7 @@ class CaseRecommendationReviewService
                     eventSummary: 'Investigation opened from approved case recommendation',
                     eventMetadata: [
                         'case_recommendation_id' => $recommendation->id,
+                        'business_profile_id' => $recommendation->business_profile_id ?? null,
                         'case_type' => $recommendation->case_type,
                         'source_risk_domains' => $recommendation->source_risk_domains ?? [],
                         'confidence_score' => $recommendation->confidence_score,
@@ -110,6 +111,7 @@ class CaseRecommendationReviewService
                         'source' => 'system:case_recommendation_approval',
                         'metadata' => [
                             'case_type' => $recommendation->case_type,
+                            'business_profile_id' => $recommendation->business_profile_id ?? null,
                             'confidence_score' => $recommendation->confidence_score,
                             'source_risk_domains' => $recommendation->source_risk_domains ?? [],
                         ],

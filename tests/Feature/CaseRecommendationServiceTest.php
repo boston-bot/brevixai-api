@@ -14,6 +14,7 @@ use App\Services\Agents\ReconciliationRiskScoringService;
 use App\Services\Agents\VendorRiskScoringService;
 use App\Services\CaseRecommendationReviewService;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -151,6 +152,40 @@ class CaseRecommendationServiceTest extends TestCase
             ->assertForbidden();
 
         $this->assertDatabaseCount('audit_cases', 0);
+    }
+
+    public function test_approval_respects_active_business_profile(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $profileA = $this->createProfile($company->id, 'Profile A');
+        $profileB = $this->createProfile($company->id, 'Profile B');
+        $recommendationA = $this->createCaseRecommendation($company->id, ['business_profile_id' => $profileA]);
+        $recommendationB = $this->createCaseRecommendation($company->id, ['business_profile_id' => $profileB]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson(
+            "/api/case-recommendations/{$recommendationB->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileA],
+        )->assertNotFound();
+
+        $this->postJson(
+            "/api/case-recommendations/{$recommendationA->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileA],
+        )
+            ->assertOk()
+            ->assertJsonPath('case.business_profile_id', $profileA);
+
+        $this->assertDatabaseHas('audit_cases', [
+            'case_recommendation_id' => $recommendationA->id,
+            'business_profile_id' => $profileA,
+        ]);
+        $this->assertDatabaseHas('case_recommendations', [
+            'id' => $recommendationB->id,
+            'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
+        ]);
     }
 
     public function test_internal_agent_endpoint_returns_recommendations_without_case_creation(): void
@@ -343,6 +378,34 @@ class CaseRecommendationServiceTest extends TestCase
         ], $overrides));
     }
 
+    private function createProfile(string $companyId, string $name): string
+    {
+        if (! Schema::hasTable('business_profiles')) {
+            Schema::create('business_profiles', function (Blueprint $table): void {
+                $table->uuid('id')->primary();
+                $table->foreignUuid('company_id');
+                $table->string('name');
+                $table->boolean('is_default')->default(false);
+                $table->string('status')->default('active');
+                $table->timestamps();
+            });
+        }
+
+        $profileId = (string) Str::uuid();
+
+        DB::table('business_profiles')->insert([
+            'id' => $profileId,
+            'company_id' => $companyId,
+            'name' => $name,
+            'is_default' => false,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $profileId;
+    }
+
     /**
      * @param  array<string, mixed>  $sources
      */
@@ -352,7 +415,7 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $scores) {}
 
-            public function scoreAllVendors(string $companyId): array
+            public function scoreAllVendors(string $companyId, ?string $businessProfileId = null): array
             {
                 return $this->scores;
             }
@@ -362,9 +425,9 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $risk) {}
 
-            public function scoreReconciliation(string $companyId): array
+            public function scoreReconciliation(string $companyId, ?string $businessProfileId = null): array
             {
-                return array_merge(['company_id' => $companyId], $this->risk);
+                return array_merge(['company_id' => $companyId, 'business_profile_id' => $businessProfileId], $this->risk);
             }
         });
 
@@ -372,9 +435,9 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $risk) {}
 
-            public function scoreEntityRelationships(string $companyId): array
+            public function scoreEntityRelationships(string $companyId, ?string $businessProfileId = null): array
             {
-                return array_merge(['company_id' => $companyId], $this->risk);
+                return array_merge(['company_id' => $companyId, 'business_profile_id' => $businessProfileId], $this->risk);
             }
         });
 
@@ -382,9 +445,9 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $summary) {}
 
-            public function getAggregateRiskSummary(string $companyId): array
+            public function getAggregateRiskSummary(string $companyId, ?string $businessProfileId = null): array
             {
-                return array_merge(['company_id' => $companyId], $this->summary);
+                return array_merge(['company_id' => $companyId, 'business_profile_id' => $businessProfileId], $this->summary);
             }
         });
 
@@ -538,6 +601,9 @@ class CaseRecommendationServiceTest extends TestCase
             'case_recommendations',
             'alert_recommendations',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {
@@ -595,6 +661,7 @@ class CaseRecommendationServiceTest extends TestCase
         Schema::create('case_recommendations', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->foreignUuid('business_profile_id')->nullable();
             $table->text('case_type');
             $table->text('severity');
             $table->text('title');
@@ -615,6 +682,7 @@ class CaseRecommendationServiceTest extends TestCase
         Schema::create('audit_cases', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->foreignUuid('business_profile_id')->nullable();
             $table->foreignUuid('case_recommendation_id')->nullable();
             $table->text('title');
             $table->text('description')->nullable();
@@ -631,6 +699,7 @@ class CaseRecommendationServiceTest extends TestCase
             $table->uuid('id')->primary();
             $table->foreignUuid('case_id');
             $table->foreignUuid('company_id');
+            $table->foreignUuid('business_profile_id')->nullable();
             $table->foreignUuid('user_id')->nullable();
             $table->text('event_type');
             $table->json('payload');

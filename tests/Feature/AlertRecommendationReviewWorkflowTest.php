@@ -8,6 +8,7 @@ use App\Models\RecommendationReviewEvent;
 use App\Models\User;
 use App\Services\AlertRecommendationReviewService;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -132,6 +133,40 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             ->assertNotFound();
 
         $this->assertDatabaseCount('alerts', 0);
+    }
+
+    public function test_approval_respects_active_business_profile(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $profileA = $this->createProfile($company->id, 'Profile A');
+        $profileB = $this->createProfile($company->id, 'Profile B');
+        $recommendationA = $this->createRecommendation($company->id, ['business_profile_id' => $profileA]);
+        $recommendationB = $this->createRecommendation($company->id, ['business_profile_id' => $profileB]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson(
+            "/api/alert-recommendations/{$recommendationB->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileA],
+        )->assertNotFound();
+
+        $this->postJson(
+            "/api/alert-recommendations/{$recommendationA->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileA],
+        )
+            ->assertOk()
+            ->assertJsonPath('alert.business_profile_id', $profileA);
+
+        $this->assertDatabaseHas('alerts', [
+            'alert_recommendation_id' => $recommendationA->id,
+            'business_profile_id' => $profileA,
+        ]);
+        $this->assertDatabaseHas('alert_recommendations', [
+            'id' => $recommendationB->id,
+            'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+        ]);
     }
 
     public function test_double_approval_blocked(): void
@@ -319,12 +354,43 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
         ], $overrides));
     }
 
+    private function createProfile(string $companyId, string $name): string
+    {
+        if (! Schema::hasTable('business_profiles')) {
+            Schema::create('business_profiles', function (Blueprint $table): void {
+                $table->uuid('id')->primary();
+                $table->foreignUuid('company_id');
+                $table->string('name');
+                $table->boolean('is_default')->default(false);
+                $table->string('status')->default('active');
+                $table->timestamps();
+            });
+        }
+
+        $profileId = (string) Str::uuid();
+
+        DB::table('business_profiles')->insert([
+            'id' => $profileId,
+            'company_id' => $companyId,
+            'name' => $name,
+            'is_default' => false,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $profileId;
+    }
+
     private function createSchema(): void
     {
         foreach ([
             'alerts',
             'alert_recommendations',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {
@@ -364,6 +430,7 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
         Schema::create('alert_recommendations', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->foreignUuid('business_profile_id')->nullable();
             $table->text('source_risk_domain');
             $table->text('alert_type');
             $table->text('severity');
@@ -382,6 +449,7 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
         Schema::create('alerts', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->foreignUuid('business_profile_id')->nullable();
             $table->uuid('group_id')->nullable();
             $table->foreignUuid('alert_recommendation_id')->nullable();
             $table->text('rule_key');
