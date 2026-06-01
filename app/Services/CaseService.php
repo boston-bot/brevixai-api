@@ -131,10 +131,20 @@ class CaseService
             $alerts = DB::table('alerts')
                 ->whereIn('id', $alertIds)
                 ->where('company_id', $companyId)
-                ->select('id', 'rule_key', 'severity', 'title', 'detail', 'evidence', 'created_at', 'status')
+                ->select(
+                    'id', 'rule_key', 'severity', 'title', 'detail', 'evidence', 'created_at', 'status',
+                    'reason_codes', 'source_system', 'confidence_score', 'evidence_refs', 'comparison_window'
+                )
                 ->get()
                 ->map(function ($alert) {
                     $alert->evidence = json_decode($alert->evidence, true);
+                    $alert->reasonCodes = json_decode($alert->reason_codes ?? '[]', true);
+                    $alert->sourceSystem = $alert->source_system;
+                    $alert->evidenceRefs = json_decode($alert->evidence_refs ?? '[]', true);
+                    $alert->confidenceScore = (float) $alert->confidence_score;
+                    $alert->deterministicCheckName = $alert->rule_key;
+                    $alert->comparisonWindow = json_decode($alert->comparison_window ?? 'null', true);
+                    $alert->humanReviewStatus = $alert->status === 'reviewed' ? 'reviewed' : 'pending';
                     return $alert;
                 });
         }

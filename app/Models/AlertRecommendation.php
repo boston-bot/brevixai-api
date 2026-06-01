@@ -73,4 +73,20 @@ class AlertRecommendation extends Model
         return $this->hasMany(RecommendationReviewEvent::class, 'recommendation_id')
             ->where('recommendation_type', RecommendationReviewEvent::TYPE_ALERT);
     }
+
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        
+        $array['reasonCodes'] = $this->source_rule_ids;
+        $array['sourceSystem'] = $this->source_risk_domain;
+        $array['evidenceRefs'] = $this->evidence;
+        $array['confidenceScore'] = $this->confidence_score;
+        $array['deterministicCheckName'] = $this->alert_type;
+        $array['comparisonWindow'] = null; // Recommendations usually don't have a single comparison window
+        $array['sourceFreshness'] = $this->created_at?->diffForHumans();
+        $array['humanReviewStatus'] = $this->status;
+
+        return $array;
+    }
 }
