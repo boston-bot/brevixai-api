@@ -10,27 +10,22 @@ use Illuminate\Http\Request;
 
 class AlertController extends Controller
 {
-    protected AlertService $alertService;
-
-    public function __construct(AlertService $alertService)
-    {
-        $this->alertService = $alertService;
-    }
+    public function __construct(private readonly AlertService $alertService) {}
 
     /**
      * GET /api/alerts
      */
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $filters = $request->only(['status', 'severity', 'rule_key', 'sort', 'limit', 'offset']);
         $skipCompute = $request->boolean('skipCompute');
 
-        $data = $this->alertService->list($companyId, $filters, $skipCompute);
+        $data = $this->alertService->list($context->companyId, $filters, $skipCompute, $context->businessProfileId);
 
         return response()->json($data);
     }
@@ -41,13 +36,13 @@ class AlertController extends Controller
     public function rules(Request $request): JsonResponse
     {
         $companyId = $request->user()->company_id;
-        if (!$companyId) {
+        if (! $companyId) {
             return response()->json(['error' => 'No company associated with account'], 403);
         }
 
         $rules = RuleDefinition::where('company_id', $companyId)->orderBy('rule_key')->get();
 
-        // Normally we'd merge with registry metadata here, 
+        // Normally we'd merge with registry metadata here,
         // for now just returning the DB definitions
         return response()->json(['rules' => $rules]);
     }
@@ -57,12 +52,12 @@ class AlertController extends Controller
      */
     public function groups(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $data = $this->alertService->getGroups($companyId);
+        $data = $this->alertService->getGroups($context->companyId, $context->businessProfileId);
 
         return response()->json($data);
     }
@@ -72,14 +67,14 @@ class AlertController extends Controller
      */
     public function show(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $detail = $this->alertService->detail($companyId, $id);
+        $detail = $this->alertService->detail($context->companyId, $id, $context->businessProfileId);
 
-        if (!$detail) {
+        if (! $detail) {
             return response()->json(['error' => 'Alert not found'], 404);
         }
 
@@ -91,21 +86,22 @@ class AlertController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $request->validate(['status' => 'required|in:open,reviewed,dismissed']);
 
         $alert = $this->alertService->updateStatus(
-            $companyId,
+            $context->companyId,
             $request->user()->id,
             $id,
-            $request->input('status')
+            $request->input('status'),
+            $context->businessProfileId,
         );
 
-        if (!$alert) {
+        if (! $alert) {
             return response()->json(['error' => 'Alert not found'], 404);
         }
 

@@ -10,33 +10,40 @@ use Illuminate\Http\Request;
 
 class CaseController extends Controller
 {
-    protected CaseService $caseService;
-
-    public function __construct(CaseService $caseService)
-    {
-        $this->caseService = $caseService;
-    }
+    public function __construct(
+        protected readonly CaseService $caseService,
+    ) {}
 
     /**
      * POST /api/cases
      */
     public function store(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
         $request->validate([
             'title' => 'required|string',
             'severity' => 'nullable|in:critical,warning,info',
             'alert_ids' => 'nullable|array',
+            'alert_ids.*' => 'uuid',
             'transaction_ids' => 'nullable|array',
+            'transaction_ids.*' => 'uuid',
         ]);
 
         try {
-            $case = $this->caseService->create($companyId, $request->user()->id, $request->all());
+            $case = $this->caseService->create(
+                $context->companyId,
+                $request->user()->id,
+                $request->all(),
+                $context->businessProfileId,
+            );
+
             return response()->json(['case' => $case], 201);
         } catch (Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['error' => $e->getMessage()], $this->safeStatus($e));
         }
     }
 
@@ -45,10 +52,13 @@ class CaseController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
-        $data = $this->caseService->list($companyId, $request->all());
+        $data = $this->caseService->list($context->companyId, $request->all(), $context->businessProfileId);
+
         return response()->json($data);
     }
 
@@ -57,11 +67,15 @@ class CaseController extends Controller
      */
     public function show(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
-        $detail = $this->caseService->detail($companyId, $id);
-        if (!$detail) return response()->json(['error' => 'Case not found'], 404);
+        $detail = $this->caseService->detail($context->companyId, $id, $context->businessProfileId);
+        if (! $detail) {
+            return response()->json(['error' => 'Case not found'], 404);
+        }
 
         return response()->json($detail);
     }
@@ -71,15 +85,23 @@ class CaseController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
         try {
-            $result = $this->caseService->update($companyId, $request->user()->id, $id, $request->all());
+            $result = $this->caseService->update(
+                $context->companyId,
+                $request->user()->id,
+                $id,
+                $request->all(),
+                $context->businessProfileId,
+            );
+
             return response()->json($result);
         } catch (Exception $e) {
-            $status = $e->getCode() === 422 ? 422 : ($e->getCode() === 404 ? 404 : 500);
-            return response()->json(['error' => $e->getMessage()], $status);
+            return response()->json(['error' => $e->getMessage()], $this->safeStatus($e));
         }
     }
 
@@ -88,8 +110,10 @@ class CaseController extends Controller
      */
     public function addEvent(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
         $request->validate([
             'event_type' => 'required|string',
@@ -98,15 +122,17 @@ class CaseController extends Controller
 
         try {
             $result = $this->caseService->addEvent(
-                $companyId, 
-                $request->user()->id, 
-                $id, 
-                $request->input('event_type'), 
-                $request->input('payload', [])
+                $context->companyId,
+                $request->user()->id,
+                $id,
+                $request->input('event_type'),
+                $request->input('payload', []),
+                $context->businessProfileId,
             );
+
             return response()->json($result, 201);
         } catch (Exception $e) {
-            return response()->json(['error' => $e->getMessage()], $e->getCode() === 404 ? 404 : 500);
+            return response()->json(['error' => $e->getMessage()], $this->safeStatus($e));
         }
     }
 
@@ -115,16 +141,25 @@ class CaseController extends Controller
      */
     public function linkAlert(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
-        $request->validate(['alert_id' => 'required|string']);
+        $request->validate(['alert_id' => 'required|uuid']);
 
         try {
-            $result = $this->caseService->linkAlert($companyId, $request->user()->id, $id, $request->input('alert_id'));
+            $result = $this->caseService->linkAlert(
+                $context->companyId,
+                $request->user()->id,
+                $id,
+                $request->input('alert_id'),
+                $context->businessProfileId,
+            );
+
             return response()->json($result);
         } catch (Exception $e) {
-            return response()->json(['error' => $e->getMessage()], $e->getCode() === 404 ? 404 : 500);
+            return response()->json(['error' => $e->getMessage()], $this->safeStatus($e));
         }
     }
 
@@ -133,14 +168,23 @@ class CaseController extends Controller
      */
     public function unlinkAlert(Request $request, string $id, string $alertId): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
         try {
-            $result = $this->caseService->unlinkAlert($companyId, $request->user()->id, $id, $alertId);
+            $result = $this->caseService->unlinkAlert(
+                $context->companyId,
+                $request->user()->id,
+                $id,
+                $alertId,
+                $context->businessProfileId,
+            );
+
             return response()->json($result);
         } catch (Exception $e) {
-            return response()->json(['error' => $e->getMessage()], $e->getCode() === 404 ? 404 : 500);
+            return response()->json(['error' => $e->getMessage()], $this->safeStatus($e));
         }
     }
 
@@ -149,12 +193,21 @@ class CaseController extends Controller
      */
     public function summary(Request $request, string $id): JsonResponse
     {
-        $companyId = $request->user()->company_id;
-        if (!$companyId) return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
 
-        $summary = $this->caseService->summary($companyId, $id);
-        if (!$summary) return response()->json(['error' => 'Case not found'], 404);
+        $summary = $this->caseService->summary($context->companyId, $id, $context->businessProfileId);
+        if (! $summary) {
+            return response()->json(['error' => 'Case not found'], 404);
+        }
 
         return response()->json($summary);
+    }
+
+    private function safeStatus(Exception $e): int
+    {
+        return in_array($e->getCode(), [403, 404, 422], true) ? $e->getCode() : 500;
     }
 }

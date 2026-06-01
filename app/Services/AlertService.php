@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\Alert;
 use App\Models\AlertGroup;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AlertService
 {
@@ -17,25 +19,25 @@ class AlertService
     /**
      * List alerts with optional filters.
      */
-    public function list(string $companyId, array $filters = [], bool $skipCompute = false): array
+    public function list(string $companyId, array $filters = [], bool $skipCompute = false, ?string $businessProfileId = null): array
     {
-        if (!$skipCompute) {
-            $this->updateAllScores($companyId);
-            $this->groupRelatedAlerts($companyId);
+        if (! $skipCompute) {
+            $this->updateAllScores($companyId, $businessProfileId);
+            $this->groupRelatedAlerts($companyId, $businessProfileId);
         }
 
-        $limit = min((int)($filters['limit'] ?? 50), 100);
-        $offset = max((int)($filters['offset'] ?? 0), 0);
+        $limit = min((int) ($filters['limit'] ?? 50), 100);
+        $offset = max((int) ($filters['offset'] ?? 0), 0);
 
-        $query = Alert::where('company_id', $companyId);
+        $query = $this->alertQuery($companyId, $businessProfileId);
 
-        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
             $query->where('status', $filters['status']);
         }
-        if (!empty($filters['severity'])) {
+        if (! empty($filters['severity'])) {
             $query->where('severity', $filters['severity']);
         }
-        if (!empty($filters['rule_key'])) {
+        if (! empty($filters['rule_key'])) {
             $query->where('rule_key', $filters['rule_key']);
         }
 
@@ -49,16 +51,16 @@ class AlertService
 
         $alerts = $query->offset($offset)->limit($limit)->get();
 
-        $countRows = DB::select(
-            "SELECT status, COUNT(*)::int AS count FROM alerts WHERE company_id = ? GROUP BY status",
-            [$companyId]
-        );
+        $countRows = $this->alertQuery($companyId, $businessProfileId)
+            ->select('status', DB::raw('COUNT(*) AS count'))
+            ->groupBy('status')
+            ->get();
 
         $counts = [];
         $total = 0;
         foreach ($countRows as $row) {
-            $counts[$row->status] = $row->count;
-            $total += $row->count;
+            $counts[$row->status] = (int) $row->count;
+            $total += (int) $row->count;
         }
 
         return [
@@ -71,21 +73,29 @@ class AlertService
     /**
      * Get a single alert and its associated transactions.
      */
-    public function detail(string $companyId, string $alertId): ?array
+    public function detail(string $companyId, string $alertId, ?string $businessProfileId = null): ?array
     {
-        $alert = Alert::where('id', $alertId)->where('company_id', $companyId)->first();
+        $alert = $this->alertQuery($companyId, $businessProfileId)
+            ->where('id', $alertId)
+            ->first();
 
-        if (!$alert) {
+        if (! $alert) {
             return null;
         }
 
         $transactions = [];
         $evidence = is_array($alert->evidence) ? $alert->evidence : [];
-        if (!empty($evidence['transactionIds'])) {
-            $transactions = DB::select(
-                "SELECT * FROM all_transactions WHERE company_id = ? AND id = ANY(?::uuid[])",
-                [$companyId, '{' . implode(',', $evidence['transactionIds']) . '}']
-            );
+        $transactionIds = array_values(array_filter($evidence['transactionIds'] ?? [], 'is_string'));
+        if ($transactionIds !== [] && Schema::hasTable('all_transactions')) {
+            $transactionQuery = DB::table('all_transactions')
+                ->where('company_id', $companyId)
+                ->whereIn('id', $transactionIds);
+
+            if ($businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+                $transactionQuery->where('business_profile_id', $businessProfileId);
+            }
+
+            $transactions = $transactionQuery->get();
         }
 
         return [
@@ -97,11 +107,13 @@ class AlertService
     /**
      * Update an alert's status.
      */
-    public function updateStatus(string $companyId, string $userId, string $alertId, string $status): ?Alert
+    public function updateStatus(string $companyId, string $userId, string $alertId, string $status, ?string $businessProfileId = null): ?Alert
     {
-        $alert = Alert::where('id', $alertId)->where('company_id', $companyId)->first();
+        $alert = $this->alertQuery($companyId, $businessProfileId)
+            ->where('id', $alertId)
+            ->first();
 
-        if (!$alert) {
+        if (! $alert) {
             return null;
         }
 
@@ -117,9 +129,10 @@ class AlertService
     /**
      * Get grouped alerts.
      */
-    public function getGroups(string $companyId): array
+    public function getGroups(string $companyId, ?string $businessProfileId = null): array
     {
         $groups = AlertGroup::where('company_id', $companyId)
+            ->when($businessProfileId && Schema::hasColumn('alert_groups', 'business_profile_id'), fn ($query) => $query->where('business_profile_id', $businessProfileId))
             ->orderBy('total_impact', 'desc')
             ->orderBy('created_at', 'desc')
             ->get();
@@ -131,10 +144,14 @@ class AlertService
     // Prioritization & Grouping Logic
     // -------------------------------------------------------------------------
 
-    private function calculateAlertPriority(string $alertId, string $companyId): int
+    private function calculateAlertPriority(string $alertId, string $companyId, ?string $businessProfileId = null): int
     {
-        $alert = Alert::where('id', $alertId)->where('company_id', $companyId)->first();
-        if (!$alert) return 50;
+        $alert = $this->alertQuery($companyId, $businessProfileId)
+            ->where('id', $alertId)
+            ->first();
+        if (! $alert) {
+            return 50;
+        }
 
         // 1. Base Severity Score
         $score = self::DEFAULT_WEIGHTS['severity'][$alert->severity] ?? 10;
@@ -154,16 +171,26 @@ class AlertService
 
         // 4. Pattern Repeat Boost
         $vendors = $evidence['vendors'] ?? [];
-        if (!empty($vendors)) {
-            $repeatCount = DB::selectOne(
-                "SELECT COUNT(*)::int as count FROM alerts 
-                 WHERE company_id = ? AND rule_key = ? AND id != ?
-                 AND evidence->'vendors' ?| array[" . implode(',', array_map(fn($v) => "'$v'", $vendors)) . "]
-                 AND created_at > NOW() - INTERVAL '90 days'",
-                [$companyId, $alert->rule_key, $alertId]
-            );
+        if (! empty($vendors)) {
+            $vendorSet = array_flip(array_map('strval', $vendors));
+            $hasRepeatVendor = $this->alertQuery($companyId, $businessProfileId)
+                ->where('rule_key', $alert->rule_key)
+                ->where('id', '!=', $alertId)
+                ->where('created_at', '>', now()->subDays(90))
+                ->get(['evidence'])
+                ->contains(function (Alert $existingAlert) use ($vendorSet): bool {
+                    $existingEvidence = is_array($existingAlert->evidence) ? $existingAlert->evidence : [];
 
-            if (($repeatCount->count ?? 0) > 0) {
+                    foreach ($existingEvidence['vendors'] ?? [] as $vendor) {
+                        if (isset($vendorSet[(string) $vendor])) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                });
+
+            if ($hasRepeatVendor) {
                 $score += 10;
             }
         }
@@ -171,34 +198,38 @@ class AlertService
         return (int) round($score);
     }
 
-    private function updateAllScores(string $companyId): void
+    private function updateAllScores(string $companyId, ?string $businessProfileId = null): void
     {
-        $openAlerts = Alert::where('company_id', $companyId)
+        $openAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->where('status', 'open')
             ->select('id')
             ->get();
 
         foreach ($openAlerts as $alert) {
-            $priority = $this->calculateAlertPriority($alert->id, $companyId);
-            Alert::where('id', $alert->id)->update(['priority_score' => $priority]);
+            $priority = $this->calculateAlertPriority($alert->id, $companyId, $businessProfileId);
+            $this->alertQuery($companyId, $businessProfileId)
+                ->where('id', $alert->id)
+                ->update(['priority_score' => $priority]);
         }
     }
 
-    private function groupRelatedAlerts(string $companyId): void
+    private function groupRelatedAlerts(string $companyId, ?string $businessProfileId = null): void
     {
-        $alerts = Alert::where('company_id', $companyId)
+        $alerts = $this->alertQuery($companyId, $businessProfileId)
             ->where('status', 'open')
             ->whereNull('group_id')
             ->get();
 
-        if ($alerts->count() < 2) return;
+        if ($alerts->count() < 2) {
+            return;
+        }
 
         $vendorGroups = [];
         foreach ($alerts as $alert) {
             $evidence = is_array($alert->evidence) ? $alert->evidence : [];
             $vendors = $evidence['vendors'] ?? [];
             foreach ($vendors as $vendor) {
-                if (!isset($vendorGroups[$vendor])) {
+                if (! isset($vendorGroups[$vendor])) {
                     $vendorGroups[$vendor] = [];
                 }
                 $vendorGroups[$vendor][] = $alert->id;
@@ -206,36 +237,55 @@ class AlertService
         }
 
         foreach ($vendorGroups as $vendor => $alertIds) {
-            if (count($alertIds) < 2) continue;
+            if (count($alertIds) < 2) {
+                continue;
+            }
 
-            $groupAlerts = DB::select(
-                "SELECT severity, (SELECT COALESCE(SUM(v::numeric), 0) FROM jsonb_array_elements(evidence->'amounts') v) as amount
-                 FROM alerts WHERE id = ANY(?::uuid[])",
-                ['{' . implode(',', $alertIds) . '}']
-            );
+            $groupAlerts = $this->alertQuery($companyId, $businessProfileId)
+                ->whereIn('id', $alertIds)
+                ->get(['id', 'severity', 'evidence']);
 
             $totalImpact = 0;
             $hasCritical = false;
             $hasWarning = false;
 
             foreach ($groupAlerts as $ga) {
-                $totalImpact += (float) $ga->amount;
-                if ($ga->severity === 'critical') $hasCritical = true;
-                if ($ga->severity === 'warning') $hasWarning = true;
+                $evidence = is_array($ga->evidence) ? $ga->evidence : [];
+                $totalImpact += array_sum(array_map('floatval', $evidence['amounts'] ?? []));
+                if ($ga->severity === 'critical') {
+                    $hasCritical = true;
+                }
+                if ($ga->severity === 'warning') {
+                    $hasWarning = true;
+                }
             }
 
             $maxSeverity = $hasCritical ? 'critical' : ($hasWarning ? 'warning' : 'info');
-            $title = "Security Cluster: " . count($alertIds) . " anomalies for {$vendor}";
+            $title = 'Security Cluster: '.count($alertIds)." anomalies for {$vendor}";
 
-            $group = AlertGroup::create([
+            $groupPayload = [
                 'company_id' => $companyId,
                 'title' => $title,
                 'alert_count' => count($alertIds),
                 'max_severity' => $maxSeverity,
                 'total_impact' => $totalImpact,
-            ]);
+            ];
 
-            Alert::whereIn('id', $alertIds)->update(['group_id' => $group->id]);
+            if ($businessProfileId && Schema::hasColumn('alert_groups', 'business_profile_id')) {
+                $groupPayload['business_profile_id'] = $businessProfileId;
+            }
+
+            $group = AlertGroup::create($groupPayload);
+
+            $this->alertQuery($companyId, $businessProfileId)
+                ->whereIn('id', $alertIds)
+                ->update(['group_id' => $group->id]);
         }
+    }
+
+    private function alertQuery(string $companyId, ?string $businessProfileId): Builder
+    {
+        return Alert::where('company_id', $companyId)
+            ->when($businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'), fn ($query) => $query->where('business_profile_id', $businessProfileId));
     }
 }

@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\AlertRecommendation;
 use App\Models\RecommendationReviewEvent;
 use App\Services\RecommendationReviewAuditService;
+use Illuminate\Support\Facades\Schema;
 
 class AlertRecommendationService
 {
@@ -35,7 +36,7 @@ class AlertRecommendationService
      *
      * @return array<string, mixed>
      */
-    public function getAlertRecommendations(string $companyId): array
+    public function getAlertRecommendations(string $companyId, ?string $businessProfileId = null): array
     {
         $aggregateSummary = $this->aggregateRiskSummaryService->getAggregateRiskSummary($companyId);
         $vendorScores = $this->vendorRiskScoringService->scoreAllVendors($companyId);
@@ -63,10 +64,11 @@ class AlertRecommendationService
             $recommendations[] = $entityRecommendation;
         }
 
-        $persistedRecommendations = $this->persistRecommendations($companyId, $recommendations);
+        $persistedRecommendations = $this->persistRecommendations($companyId, $recommendations, $businessProfileId);
 
         return [
             'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
             'recommended_alerts' => $persistedRecommendations,
         ];
     }
@@ -271,7 +273,7 @@ class AlertRecommendationService
      * @param  array<int, array<string, mixed>>  $recommendations
      * @return array<int, array<string, mixed>>
      */
-    private function persistRecommendations(string $companyId, array $recommendations): array
+    private function persistRecommendations(string $companyId, array $recommendations, ?string $businessProfileId = null): array
     {
         $persisted = [];
         $activeKeys = [];
@@ -282,6 +284,7 @@ class AlertRecommendationService
             $activeKeys[] = $this->recommendationKey($alertType, $sourceRiskDomain);
 
             $record = AlertRecommendation::where('company_id', $companyId)
+                ->when($businessProfileId && Schema::hasColumn('alert_recommendations', 'business_profile_id'), fn ($query) => $query->where('business_profile_id', $businessProfileId))
                 ->where('alert_type', $alertType)
                 ->where('source_risk_domain', $sourceRiskDomain)
                 ->where('status', AlertRecommendation::STATUS_PENDING_REVIEW)
@@ -294,6 +297,10 @@ class AlertRecommendationService
                     'source_risk_domain' => $sourceRiskDomain,
                     'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
                 ]);
+            }
+
+            if ($businessProfileId && Schema::hasColumn('alert_recommendations', 'business_profile_id')) {
+                $record->business_profile_id = $businessProfileId;
             }
 
             $isNewRecommendation = ! $record->exists;
@@ -323,13 +330,14 @@ class AlertRecommendationService
                         'source_rule_ids' => $record->source_rule_ids ?? [],
                         'confidence_score' => $record->confidence_score,
                     ],
+                    businessProfileId: $businessProfileId,
                 );
             }
 
             $persisted[] = $this->recommendationPayload($record);
         }
 
-        $this->expireStalePendingRecommendations($companyId, $activeKeys);
+        $this->expireStalePendingRecommendations($companyId, $activeKeys, $businessProfileId);
 
         return $persisted;
     }
@@ -337,13 +345,14 @@ class AlertRecommendationService
     /**
      * @param  array<int, string>  $activeKeys
      */
-    private function expireStalePendingRecommendations(string $companyId, array $activeKeys): void
+    private function expireStalePendingRecommendations(string $companyId, array $activeKeys, ?string $businessProfileId = null): void
     {
         AlertRecommendation::where('company_id', $companyId)
+            ->when($businessProfileId && Schema::hasColumn('alert_recommendations', 'business_profile_id'), fn ($query) => $query->where('business_profile_id', $businessProfileId))
             ->where('status', AlertRecommendation::STATUS_PENDING_REVIEW)
             ->whereIn('alert_type', self::MANAGED_ALERT_TYPES)
             ->get()
-            ->each(function (AlertRecommendation $recommendation) use ($activeKeys): void {
+            ->each(function (AlertRecommendation $recommendation) use ($activeKeys, $businessProfileId): void {
                 if (! in_array($this->recommendationKey($recommendation->alert_type, $recommendation->source_risk_domain), $activeKeys, true)) {
                     $recommendation->update(['status' => AlertRecommendation::STATUS_EXPIRED]);
 
@@ -357,6 +366,7 @@ class AlertRecommendationService
                             'alert_type' => $recommendation->alert_type,
                             'source_risk_domain' => $recommendation->source_risk_domain,
                         ],
+                        businessProfileId: $businessProfileId,
                     );
                 }
             });
@@ -369,6 +379,7 @@ class AlertRecommendationService
     {
         return [
             'id' => $recommendation->id,
+            'business_profile_id' => $recommendation->business_profile_id ?? null,
             'alert_type' => $recommendation->alert_type,
             'severity' => $recommendation->severity,
             'title' => $recommendation->title,
