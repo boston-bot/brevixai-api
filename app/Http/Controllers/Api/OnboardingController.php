@@ -108,6 +108,35 @@ class OnboardingController extends Controller
         ]));
     }
 
+    public function storeAnswer(Request $request): JsonResponse
+    {
+        // Simple proxy to updateSession for businessContext
+        $payload = $request->validate([
+            'answerKey' => ['required', 'string'],
+            'answerValue' => ['required'],
+        ]);
+
+        $request->merge([
+            'businessContext' => [
+                $payload['answerKey'] => $payload['answerValue']
+            ]
+        ]);
+
+        return $this->updateSession($request);
+    }
+
+    public function updateEvidenceItem(Request $request, string $id): JsonResponse
+    {
+        // Future: Handle individual evidence item status updates if not driven by uploads
+        return response()->json(['status' => 'acknowledged', 'id' => $id]);
+    }
+
+    public function complete(Request $request): JsonResponse
+    {
+        $request->merge(['status' => OnboardingSessionService::STATUS_COMPLETED]);
+        return $this->updateSession($request);
+    }
+
     private function resolveContext(Request $request): BusinessProfileContext|JsonResponse
     {
         try {

@@ -380,6 +380,15 @@ class AlertRecommendationService
             'status' => $recommendation->status,
             'requires_human_review' => true,
             'can_auto_create' => false,
+            // Moat Visibility Fields
+            'reasonCodes' => $recommendation->source_rule_ids ?? [],
+            'sourceSystem' => $recommendation->source_risk_domain,
+            'evidenceRefs' => $recommendation->evidence ?? [],
+            'confidenceScore' => $recommendation->confidence_score,
+            'deterministicCheckName' => $recommendation->alert_type,
+            'comparisonWindow' => null,
+            'sourceFreshness' => $recommendation->created_at?->diffForHumans(),
+            'humanReviewStatus' => $recommendation->status,
         ];
     }
 

@@ -205,6 +205,9 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/session', [OnboardingController::class, 'showSession']);
         Route::patch('/session', [OnboardingController::class, 'updateSession']);
         Route::get('/evidence-requirements', [OnboardingController::class, 'evidenceRequirements']);
+        Route::post('/answers', [OnboardingController::class, 'storeAnswer']);
+        Route::patch('/evidence-items/{id}', [OnboardingController::class, 'updateEvidenceItem']);
+        Route::post('/complete', [OnboardingController::class, 'complete']);
     });
 
     Route::get('/action-plan', [ActionPlanController::class, 'show']);

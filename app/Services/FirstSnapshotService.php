@@ -16,7 +16,7 @@ class FirstSnapshotService
      * @param  array{summary?: array<string, mixed>, sources?: list<array<string, mixed>>}  $dataSources
      * @return array<string, mixed>
      */
-    public function placeholder(
+    public function build(
         OnboardingSession $session,
         array $requirementsPayload,
         array $dataSources,
@@ -28,12 +28,13 @@ class FirstSnapshotService
         $actionPlan = $this->actionPlanService->build($session, $requirementsPayload, $dataSources);
 
         $hasMinimumEvidence = ($readiness['status'] ?? null) === 'ready_for_snapshot';
+        $status = $hasMinimumEvidence ? 'ready' : 'not_ready';
+        $confidence = $hasMinimumEvidence ? 'medium' : 'low';
 
         return [
-            'status' => $hasMinimumEvidence ? 'ready_placeholder' : 'not_ready',
-            'mode' => 'placeholder',
-            'sessionId' => (string) $session->id,
-            'dataReadiness' => $readiness,
+            'contractVersion' => '2026-05-31',
+            'status' => $status,
+            'readinessScore' => $readiness['score'] ?? 0,
             'reviewScope' => [
                 'primaryIntent' => $requirementsPayload['primaryIntent'] ?? EvidenceRequirementService::INTENT_UNSURE,
                 'label' => $this->evidenceRequirements->intentLabel($session->primary_intent),
@@ -42,12 +43,13 @@ class FirstSnapshotService
                     'start' => $session->review_period_start?->toDateString(),
                     'end' => $session->review_period_end?->toDateString(),
                 ],
-                'limitations' => $this->limitations($missingRequired),
             ],
-            'availableSources' => $dataSources['sources'] ?? [],
+            'evidenceUsed' => $dataSources['sources'] ?? [],
             'missingEvidence' => $missingEvidence,
-            'riskIndicators' => [],
+            'riskIndicators' => $hasMinimumEvidence ? $this->getDeterministicRiskIndicators($session) : [],
             'dataQualityIssues' => $this->dataQualityIssues($readiness, $missingRequired),
+            'scopeLimitations' => $this->limitations($missingRequired),
+            'confidence' => $confidence,
             'recommendedNextAction' => $actionPlan['nextBestAction'],
             'upgradeGates' => [
                 [
@@ -58,6 +60,26 @@ class FirstSnapshotService
             ],
             'languageGuardrail' => 'Brevix reports risk indicators and evidence gaps. It does not provide legal, tax, accounting, audit, CPA, or law-enforcement conclusions.',
         ];
+    }
+
+    private function getDeterministicRiskIndicators(OnboardingSession $session): array
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('alerts')) {
+            return [];
+        }
+
+        $query = \Illuminate\Support\Facades\DB::table('alerts')
+            ->where('company_id', $session->company_id)
+            ->where('status', 'open');
+        if ($session->business_profile_id) {
+            $query->where('business_profile_id', $session->business_profile_id);
+        }
+        
+        return $query->limit(5)->get()->map(fn($alert) => [
+            'id' => (string) $alert->id,
+            'title' => (string) $alert->title,
+            'severity' => (string) $alert->severity,
+        ])->all();
     }
 
     /**

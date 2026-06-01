@@ -26,30 +26,89 @@ class ActionPlanService
         $nextBestAction = $this->nextBestAction($session, $readiness, $missingEvidence);
 
         return [
-            'currentObjective' => [
-                'intent' => $requirementsPayload['primaryIntent'] ?? EvidenceRequirementService::INTENT_UNSURE,
-                'label' => $this->evidenceRequirements->intentLabel($session->primary_intent),
-                'reviewPeriod' => [
-                    'start' => $session->review_period_start?->toDateString(),
-                    'end' => $session->review_period_end?->toDateString(),
-                ],
-                'scopeMode' => (string) $session->scope_mode,
+            'contractVersion' => '2026-05-31',
+            'objective' => $requirementsPayload['primaryIntent'] ?? EvidenceRequirementService::INTENT_UNSURE,
+            'objectiveDetail' => $this->evidenceRequirements->intentLabel($session->primary_intent),
+            'reviewPeriod' => [
+                'start' => $session->review_period_start?->toDateString(),
+                'end' => $session->review_period_end?->toDateString(),
             ],
+            'scopeMode' => (string) $session->scope_mode,
             'nextBestAction' => $nextBestAction,
-            'evidenceReadiness' => $readiness,
+            'readiness' => $readiness,
             'missingEvidence' => array_values($missingEvidence),
             'openFindings' => $this->openFindings((string) $session->company_id, $session->business_profile_id ? (string) $session->business_profile_id : null),
             'openQuestions' => $this->openQuestions($missingEvidence),
             'recentSources' => array_slice($dataSources['sources'] ?? [], 0, 5),
-            'dataSources' => $dataSources,
-            'firstSnapshot' => [
-                'status' => ($readiness['status'] ?? null) === 'ready_for_snapshot'
-                    ? 'ready'
-                    : 'placeholder',
-                'endpoint' => '/api/reviews/first-snapshot',
-                'method' => 'POST',
-            ],
+            'sourceFreshness' => $this->sourceFreshness($dataSources),
+            'workflowCards' => $this->workflowCards($session, $readiness),
             'rexPrompts' => $this->rexPrompts($session, $readiness, $missingEvidence),
+            'valueLoop' => $this->valueLoop($session, $dataSources),
+            'guardrail' => [
+                'status' => 'safe',
+                'message' => 'Brevix does not provide legal, tax, or accounting advice.',
+            ],
+        ];
+    }
+
+    /**
+     * @param array{summary?: array<string, mixed>, sources?: list<array<string, mixed>>} $dataSources
+     * @return array<string, mixed>
+     */
+    private function sourceFreshness(array $dataSources): array
+    {
+        $lastSync = null;
+        $activeConnections = 0;
+        foreach ($dataSources['sources'] ?? [] as $source) {
+            if (!empty($source['lastSyncedAt'])) {
+                if ($lastSync === null || $source['lastSyncedAt'] > $lastSync) {
+                    $lastSync = $source['lastSyncedAt'];
+                }
+            }
+            if (($source['status'] ?? '') === 'active') {
+                $activeConnections++;
+            }
+        }
+        
+        return [
+            'lastSync' => $lastSync,
+            'activeConnections' => $activeConnections,
+            'status' => $lastSync ? 'fresh' : 'stale',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $readiness
+     * @return list<array<string, mixed>>
+     */
+    private function workflowCards(OnboardingSession $session, array $readiness): array
+    {
+        $cards = [];
+        $cards[] = [
+            'id' => 'first_snapshot',
+            'title' => 'First Snapshot',
+            'status' => ($readiness['status'] ?? null) === 'ready_for_snapshot' ? 'ready' : 'locked',
+            'endpoint' => '/api/reviews/first-snapshot',
+        ];
+        return $cards;
+    }
+
+    /**
+     * @param array{summary?: array<string, mixed>, sources?: list<array<string, mixed>>} $dataSources
+     * @return array<string, mixed>
+     */
+    private function valueLoop(OnboardingSession $session, array $dataSources): array
+    {
+        $hasSources = count($dataSources['sources'] ?? []) > 0;
+        
+        return [
+            'newSinceLastVisit' => true,
+            'sourcesChanged' => $hasSources,
+            'findingsChanged' => false,
+            'readinessChanged' => true,
+            'casesChanged' => false,
+            'monitoringCoverage' => 'partial',
+            'recommendedReviewCadence' => 'monthly',
         ];
     }
 

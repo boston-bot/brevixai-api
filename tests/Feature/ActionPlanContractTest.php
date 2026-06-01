@@ -15,7 +15,7 @@ use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
-class GuidedOnboardingContractTest extends TestCase
+class ActionPlanContractTest extends TestCase
 {
     protected function setUp(): void
     {
@@ -40,99 +40,42 @@ class GuidedOnboardingContractTest extends TestCase
         $this->createSchema();
     }
 
-    public function test_get_onboarding_session_creates_profile_scoped_contract(): void
+    public function test_action_plan_with_no_intent(): void
     {
         [$company, $user, $profile] = $this->createWorkspace();
         Sanctum::actingAs($user);
 
-        $this->getJson('/api/onboarding/session', ['X-Brevix-Business-Profile-Id' => $profile->id])
+        $this->getJson('/api/action-plan', ['X-Brevix-Business-Profile-Id' => $profile->id])
             ->assertOk()
-            ->assertJsonPath('session.companyId', $company->id)
-            ->assertJsonPath('session.businessProfileId', $profile->id)
-            ->assertJsonPath('session.status', 'in_progress')
-            ->assertJsonPath('session.currentStep', 'intent')
-            ->assertJsonPath('session.scopeMode', 'standard')
-            ->assertJsonPath('session.dataReadiness.status', 'not_ready');
-
-        $this->assertDatabaseHas('onboarding_sessions', [
-            'company_id' => $company->id,
-            'business_profile_id' => $profile->id,
-            'status' => 'in_progress',
-        ]);
+            ->assertJsonPath('contractVersion', '2026-05-31')
+            ->assertJsonPath('objective', 'unsure')
+            ->assertJsonPath('nextBestAction.actionKey', 'choose_primary_intent')
+            ->assertJsonPath('valueLoop.newSinceLastVisit', true);
     }
 
-    public function test_patch_onboarding_session_autosaves_intent_context_and_period(): void
-    {
-        [, $user, $profile] = $this->createWorkspace();
-        Sanctum::actingAs($user);
-
-        $response = $this->patchJson('/api/onboarding/session', [
-            'primaryIntent' => 'suspected_fraud',
-            'currentStep' => 'evidence_checklist',
-            'reviewPeriod' => [
-                'start' => '2026-01-01',
-                'end' => '2026-03-31',
-            ],
-            'businessContext' => [
-                'organizationType' => 'nonprofit',
-                'industryOrActivity' => 'Youth sports',
-                'accountingSystem' => 'bank exports only',
-                'checksUsed' => true,
-                'authorizedSignerCount' => 2,
-                'bookAccessCount' => 3,
-                'statedConcernSummary' => 'A parent reported possible missing tournament funds.',
-            ],
-        ], ['X-Brevix-Business-Profile-Id' => $profile->id])
-            ->assertOk()
-            ->assertJsonPath('session.primaryIntent', 'suspected_fraud_or_missing_funds')
-            ->assertJsonPath('session.currentStep', 'evidence_checklist')
-            ->assertJsonPath('session.reviewPeriod.start', '2026-01-01')
-            ->assertJsonPath('session.reviewPeriod.end', '2026-03-31')
-            ->assertJsonPath('session.businessContext.checksUsed', true);
-
-        $sessionId = $response->json('session.id');
-        $this->assertDatabaseHas('onboarding_answers', [
-            'onboarding_session_id' => $sessionId,
-            'answer_key' => 'organizationType',
-        ]);
-    }
-
-    public function test_post_answers_and_complete_transitions(): void
-    {
-        [, $user, $profile] = $this->createWorkspace();
-        Sanctum::actingAs($user);
-
-        // Test POST /api/onboarding/answers
-        $this->postJson('/api/onboarding/answers', [
-            'answerKey' => 'industryOrActivity',
-            'answerValue' => 'Software Development',
-        ], ['X-Brevix-Business-Profile-Id' => $profile->id])
-            ->assertOk()
-            ->assertJsonPath('session.businessContext.industryOrActivity', 'Software Development');
-
-        // Test PATCH /api/onboarding/evidence-items/{id}
-        $this->patchJson('/api/onboarding/evidence-items/bank_statements', [], ['X-Brevix-Business-Profile-Id' => $profile->id])
-            ->assertOk()
-            ->assertJsonPath('status', 'acknowledged');
-
-        // Test POST /api/onboarding/complete
-        $this->postJson('/api/onboarding/complete', [], ['X-Brevix-Business-Profile-Id' => $profile->id])
-            ->assertOk()
-            ->assertJsonPath('session.status', 'completed');
-    }
-
-    public function test_suspected_fraud_requirements_mark_financial_upload_received_and_documents_missing(): void
+    public function test_action_plan_intent_selected_no_evidence(): void
     {
         [$company, $user, $profile] = $this->createWorkspace();
         Sanctum::actingAs($user);
 
         $this->patchJson('/api/onboarding/session', [
             'primaryIntent' => 'suspected_fraud_or_missing_funds',
-            'businessContext' => [
-                'checksUsed' => true,
-                'authorizedSignerCount' => 2,
-                'bookAccessCount' => 3,
-            ],
+        ], ['X-Brevix-Business-Profile-Id' => $profile->id])->assertOk();
+
+        $this->getJson('/api/action-plan', ['X-Brevix-Business-Profile-Id' => $profile->id])
+            ->assertOk()
+            ->assertJsonPath('contractVersion', '2026-05-31')
+            ->assertJsonPath('objective', 'suspected_fraud_or_missing_funds')
+            ->assertJsonPath('nextBestAction.actionKey', 'add_required_evidence');
+    }
+
+    public function test_action_plan_ready_for_first_snapshot(): void
+    {
+        [$company, $user, $profile] = $this->createWorkspace();
+        Sanctum::actingAs($user);
+
+        $this->patchJson('/api/onboarding/session', [
+            'primaryIntent' => 'routine_books_review',
         ], ['X-Brevix-Business-Profile-Id' => $profile->id])->assertOk();
 
         DB::table('uploads')->insert([
@@ -150,78 +93,33 @@ class GuidedOnboardingContractTest extends TestCase
             'promoted_at' => now(),
         ]);
 
-        $response = $this->getJson('/api/onboarding/evidence-requirements', ['X-Brevix-Business-Profile-Id' => $profile->id])
+        $this->getJson('/api/action-plan', ['X-Brevix-Business-Profile-Id' => $profile->id])
             ->assertOk()
-            ->assertJsonPath('primaryIntent', 'suspected_fraud_or_missing_funds')
-            ->assertJsonPath('readiness.status', 'scope_limited')
-            ->assertJsonPath('dataSources.summary.hasFinancialData', true);
-
-        $requirements = collect($response->json('requirements'))->keyBy('requirementKey');
-        $this->assertSame('received', $requirements['transaction_ledger']['status']);
-        $this->assertSame('missing', $requirements['bank_statements']['status']);
-        $this->assertSame('received', $requirements['access_authority_list']['status']);
-        $this->assertSame('missing', $requirements['check_images']['status']);
+            ->assertJsonPath('contractVersion', '2026-05-31')
+            ->assertJsonPath('readiness.status', 'ready_for_snapshot')
+            ->assertJsonPath('nextBestAction.actionKey', 'run_first_snapshot')
+            ->assertJsonPath('valueLoop.sourcesChanged', true);
     }
 
-    public function test_action_plan_and_first_snapshot_return_placeholder_contracts(): void
+    public function test_action_plan_open_findings_present(): void
     {
         [$company, $user, $profile] = $this->createWorkspace();
         Sanctum::actingAs($user);
-
-        $this->patchJson('/api/onboarding/session', [
-            'primaryIntent' => 'tax_or_irs_issue',
-            'businessContext' => [
-                'taxPeriod' => '2025 payroll Q4',
-                'noticeType' => 'Payroll notice',
-            ],
-        ], ['X-Brevix-Business-Profile-Id' => $profile->id])->assertOk();
 
         DB::table('alerts')->insert([
             'id' => (string) Str::uuid(),
             'company_id' => $company->id,
             'business_profile_id' => $profile->id,
-            'title' => 'Sample open finding',
-            'severity' => 'warning',
+            'title' => 'High risk alert',
+            'severity' => 'critical',
             'status' => 'open',
             'created_at' => now(),
         ]);
 
         $this->getJson('/api/action-plan', ['X-Brevix-Business-Profile-Id' => $profile->id])
             ->assertOk()
-            ->assertJsonPath('objective', 'tax_or_irs_issue')
-            ->assertJsonPath('nextBestAction.actionKey', 'add_required_evidence')
-            ->assertJsonPath('workflowCards.0.endpoint', '/api/reviews/first-snapshot')
-            ->assertJsonPath('openFindings.count', 1);
-
-        $this->postJson('/api/reviews/first-snapshot', [], ['X-Brevix-Business-Profile-Id' => $profile->id])
-            ->assertOk()
-            ->assertJsonPath('contractVersion', '2026-05-31')
-            ->assertJsonPath('status', 'not_ready')
-            ->assertJsonPath('confidence', 'low')
-            ->assertJsonPath('dataQualityIssues.0.issueKey', 'insufficient_required_evidence')
-            ->assertJsonPath('riskIndicators', [])
-            ->assertJsonPath('upgradeGates.0.featureKey', 'full_snapshot_analysis');
-    }
-
-    public function test_sessions_are_isolated_by_business_profile(): void
-    {
-        [$company, $user, $profileA] = $this->createWorkspace();
-        $profileB = $this->createProfile($company, 'Second Profile');
-        Sanctum::actingAs($user);
-
-        $sessionA = $this->patchJson('/api/onboarding/session', [
-            'primaryIntent' => 'reconciliation_cleanup',
-        ], ['X-Brevix-Business-Profile-Id' => $profileA->id])
-            ->assertOk()
-            ->json('session.id');
-
-        $sessionB = $this->getJson('/api/onboarding/session', ['X-Brevix-Business-Profile-Id' => $profileB->id])
-            ->assertOk()
-            ->assertJsonPath('session.primaryIntent', null)
-            ->json('session.id');
-
-        $this->assertNotSame($sessionA, $sessionB);
-        $this->assertSame(2, OnboardingSession::where('company_id', $company->id)->count());
+            ->assertJsonPath('openFindings.count', 1)
+            ->assertJsonPath('openFindings.items.0.title', 'High risk alert');
     }
 
     private function createSchema(): void
