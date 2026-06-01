@@ -27,6 +27,7 @@ class AlertRecommendation extends Model
 
     protected $fillable = [
         'company_id',
+        'business_profile_id',
         'source_risk_domain',
         'alert_type',
         'severity',
@@ -77,7 +78,7 @@ class AlertRecommendation extends Model
     public function toArray(): array
     {
         $array = parent::toArray();
-        
+
         $array['reasonCodes'] = $this->source_rule_ids;
         $array['sourceSystem'] = $this->source_risk_domain;
         $array['evidenceRefs'] = $this->evidence;

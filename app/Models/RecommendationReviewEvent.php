@@ -38,6 +38,7 @@ class RecommendationReviewEvent extends Model
 
     protected $fillable = [
         'company_id',
+        'business_profile_id',
         'recommendation_type',
         'recommendation_id',
         'event_type',

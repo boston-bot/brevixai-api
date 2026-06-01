@@ -25,11 +25,12 @@ class AlertRecommendationReviewService
         string $userId,
         string $recommendationId,
         string $actorType = RecommendationReviewEvent::ACTOR_USER,
+        ?string $businessProfileId = null,
     ): ?array {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $actorType): ?array {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $actorType, $businessProfileId): ?array {
             $this->assertHumanReviewer($companyId, $userId, $actorType);
 
-            $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
+            $recommendation = $this->lockedRecommendation($companyId, $recommendationId, $businessProfileId);
             if (! $recommendation) {
                 return null;
             }
@@ -47,6 +48,10 @@ class AlertRecommendationReviewService
                 'status' => 'open',
                 'priority_score' => $this->priorityScore($recommendation->severity),
             ];
+
+            if ($recommendation->business_profile_id && Schema::hasColumn('alerts', 'business_profile_id')) {
+                $alertPayload['business_profile_id'] = $recommendation->business_profile_id;
+            }
 
             if (Schema::hasColumn('alerts', 'reason_codes')) {
                 $alertPayload = array_merge($alertPayload, [
@@ -79,6 +84,7 @@ class AlertRecommendationReviewService
                     'alert_type' => $recommendation->alert_type,
                     'severity' => $recommendation->severity,
                 ],
+                businessProfileId: $businessProfileId,
             );
 
             return [
@@ -94,11 +100,12 @@ class AlertRecommendationReviewService
         string $recommendationId,
         ?string $reviewNote = null,
         string $actorType = RecommendationReviewEvent::ACTOR_USER,
+        ?string $businessProfileId = null,
     ): ?AlertRecommendation {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote, $actorType): ?AlertRecommendation {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote, $actorType, $businessProfileId): ?AlertRecommendation {
             $this->assertHumanReviewer($companyId, $userId, $actorType);
 
-            $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
+            $recommendation = $this->lockedRecommendation($companyId, $recommendationId, $businessProfileId);
             if (! $recommendation) {
                 return null;
             }
@@ -124,15 +131,17 @@ class AlertRecommendationReviewService
                     'severity' => $recommendation->severity,
                     'has_review_note' => $reviewNote !== null && $reviewNote !== '',
                 ],
+                businessProfileId: $businessProfileId,
             );
 
             return $recommendation->fresh(['alert']);
         });
     }
 
-    private function lockedRecommendation(string $companyId, string $recommendationId): ?AlertRecommendation
+    private function lockedRecommendation(string $companyId, string $recommendationId, ?string $businessProfileId = null): ?AlertRecommendation
     {
         return AlertRecommendation::where('company_id', $companyId)
+            ->when($businessProfileId && Schema::hasColumn('alert_recommendations', 'business_profile_id'), fn ($query) => $query->where('business_profile_id', $businessProfileId))
             ->where('id', $recommendationId)
             ->lockForUpdate()
             ->first();

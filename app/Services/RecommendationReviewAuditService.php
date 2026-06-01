@@ -52,6 +52,7 @@ class RecommendationReviewAuditService
         string $actorType,
         ?string $actorId = null,
         ?array $metadata = null,
+        ?string $businessProfileId = null,
     ): ?RecommendationReviewEvent {
         $this->validate($recommendationType, $eventType, $actorType);
 
@@ -59,7 +60,7 @@ class RecommendationReviewAuditService
             return null;
         }
 
-        return RecommendationReviewEvent::create([
+        $attributes = [
             'company_id' => $companyId,
             'recommendation_type' => $recommendationType,
             'recommendation_id' => $recommendationId,
@@ -68,19 +69,26 @@ class RecommendationReviewAuditService
             'actor_id' => $actorId,
             'event_metadata' => $metadata === null ? null : $this->redactSensitiveMetadata($metadata),
             'created_at' => now(),
-        ]);
+        ];
+
+        if ($businessProfileId && Schema::hasColumn('recommendation_review_events', 'business_profile_id')) {
+            $attributes['business_profile_id'] = $businessProfileId;
+        }
+
+        return RecommendationReviewEvent::create($attributes);
     }
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function history(string $companyId, string $recommendationType, string $recommendationId): array
+    public function history(string $companyId, string $recommendationType, string $recommendationId, ?string $businessProfileId = null): array
     {
         if (! Schema::hasTable('recommendation_review_events')) {
             return [];
         }
 
         return RecommendationReviewEvent::where('company_id', $companyId)
+            ->when($businessProfileId && Schema::hasColumn('recommendation_review_events', 'business_profile_id'), fn ($query) => $query->where('business_profile_id', $businessProfileId))
             ->where('recommendation_type', $recommendationType)
             ->where('recommendation_id', $recommendationId)
             ->orderBy('created_at')
