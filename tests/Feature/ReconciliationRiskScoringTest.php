@@ -55,7 +55,7 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_stale_unreconciled_items(): void
     {
         // Insert a discrepancy marked as stale_unreconciled
-        $d = new ReconciliationDiscrepancy();
+        $d = new ReconciliationDiscrepancy;
         $d->id = '88888888-1111-4888-8888-888888888881';
         $d->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $d->run_id = Phase1AgentFraudScenarioSeeder::RECON_RUN_ID;
@@ -82,7 +82,7 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_duplicate_ledger_entries(): void
     {
         // Insert duplicate ledger entry discrepancy
-        $d = new ReconciliationDiscrepancy();
+        $d = new ReconciliationDiscrepancy;
         $d->id = '88888888-2222-4888-8888-888888888882';
         $d->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $d->run_id = Phase1AgentFraudScenarioSeeder::RECON_RUN_ID;
@@ -109,7 +109,7 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_deposit_mismatch(): void
     {
         // Insert unmatched deposit bank transaction
-        $bankTx = new Transaction();
+        $bankTx = new Transaction;
         $bankTx->id = '88888888-0001-4888-8888-888888888880';
         $bankTx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $bankTx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -121,7 +121,7 @@ class ReconciliationRiskScoringTest extends TestCase
         $bankTx->save();
 
         // Create missing_from_books discrepancy linked to the bank deposit
-        $d = new ReconciliationDiscrepancy();
+        $d = new ReconciliationDiscrepancy;
         $d->id = '88888888-3333-4888-8888-888888888883';
         $d->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $d->run_id = Phase1AgentFraudScenarioSeeder::RECON_RUN_ID;
@@ -152,7 +152,7 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_withdrawal_mismatch(): void
     {
         // Insert unmatched withdrawal bank transaction
-        $bankTx = new Transaction();
+        $bankTx = new Transaction;
         $bankTx->id = '88888888-0002-4888-8888-888888888880';
         $bankTx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $bankTx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -164,7 +164,7 @@ class ReconciliationRiskScoringTest extends TestCase
         $bankTx->save();
 
         // Create missing_from_books discrepancy linked to the bank withdrawal
-        $d = new ReconciliationDiscrepancy();
+        $d = new ReconciliationDiscrepancy;
         $d->id = '88888888-4444-4888-8888-888888888884';
         $d->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $d->run_id = Phase1AgentFraudScenarioSeeder::RECON_RUN_ID;
@@ -195,7 +195,7 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_suspicious_manual_adjustment(): void
     {
         // Insert a transaction with suspicious manual adjustment keyword in memo
-        $adjTx = new Transaction();
+        $adjTx = new Transaction;
         $adjTx->id = '88888888-0003-4888-8888-888888888880';
         $adjTx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $adjTx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -220,13 +220,13 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_reconciliation_risk_api_endpoint_structure_and_auth(): void
     {
         // 1. Assert auth protection (requires token)
-        $unauth = $this->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/reconciliation-risk');
+        $unauth = $this->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/reconciliation-risk');
         $unauth->assertStatus(401);
 
         // 2. Access with valid token and fetch reconciliation risk
         $response = $this->withToken('test-agent-key')
             ->withHeader('X-Brevix-User-Id', Phase1AgentFraudScenarioSeeder::USER_ID)
-            ->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/reconciliation-risk');
+            ->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/reconciliation-risk');
 
         $response->assertOk();
         $response->assertJsonStructure([
@@ -236,7 +236,7 @@ class ReconciliationRiskScoringTest extends TestCase
             'triggered_rules',
             'rule_weights',
             'supporting_evidence',
-            'recommended_next_action'
+            'recommended_next_action',
         ]);
     }
 
@@ -246,7 +246,7 @@ class ReconciliationRiskScoringTest extends TestCase
     public function test_stable_scoring_consistency(): void
     {
         // Insert a mismatch
-        $d = new ReconciliationDiscrepancy();
+        $d = new ReconciliationDiscrepancy;
         $d->id = '88888888-5555-4888-8888-888888888885';
         $d->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $d->run_id = Phase1AgentFraudScenarioSeeder::RECON_RUN_ID;
@@ -269,13 +269,13 @@ class ReconciliationRiskScoringTest extends TestCase
     private function seedBaseData(): void
     {
         // Seed Company
-        $company = new Company();
+        $company = new Company;
         $company->id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $company->name = 'Acme Corp';
         $company->save();
 
         // Seed User
-        $user = new User();
+        $user = new User;
         $user->id = Phase1AgentFraudScenarioSeeder::USER_ID;
         $user->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $user->email = 'admin@acme.com';
@@ -283,7 +283,7 @@ class ReconciliationRiskScoringTest extends TestCase
         $user->save();
 
         // Seed Upload
-        $upload = new Upload();
+        $upload = new Upload;
         $upload->id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $upload->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $upload->uploaded_by = Phase1AgentFraudScenarioSeeder::USER_ID;
@@ -292,7 +292,7 @@ class ReconciliationRiskScoringTest extends TestCase
         $upload->save();
 
         // Seed Reconciliation Run
-        $recon = new ReconciliationResult();
+        $recon = new ReconciliationResult;
         $recon->id = Phase1AgentFraudScenarioSeeder::RECON_RUN_ID;
         $recon->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $recon->period_start = '2026-05-01';
@@ -315,6 +315,9 @@ class ReconciliationRiskScoringTest extends TestCase
             'reconciliation_results',
             'transactions',
             'uploads',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

@@ -4,9 +4,10 @@ namespace App\Services\Agents;
 
 use App\Models\Alert;
 use App\Models\Transaction;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class VendorRiskScoringService
 {
@@ -26,23 +27,19 @@ class VendorRiskScoringService
 
     /**
      * Compute a vendor risk score from 0-100 using weighted deterministic rules.
-     *
-     * @param string $companyId
-     * @param string $vendorName
-     * @return array
      */
-    public function scoreVendor(string $companyId, string $vendorName): array
+    public function scoreVendor(string $companyId, string $vendorName, ?string $businessProfileId = null): array
     {
         // 1. Fetch transactions for this specific vendor
-        $vendorTxns = Transaction::where('company_id', $companyId)
+        $vendorTxns = $this->transactionQuery($companyId, $businessProfileId)
             ->where('vendor_customer', $vendorName)
             ->get();
 
         // 2. Fetch all transactions for the company (needed for relative calculations)
-        $companyTxns = Transaction::where('company_id', $companyId)->get();
+        $companyTxns = $this->transactionQuery($companyId, $businessProfileId)->get();
 
         if ($vendorTxns->isEmpty()) {
-            return $this->emptyVendorResponse($vendorName);
+            return $this->emptyVendorResponse($vendorName, $businessProfileId);
         }
 
         $triggeredRules = [];
@@ -63,7 +60,7 @@ class VendorRiskScoringService
                     'rule_key' => 'new_vendor',
                     'name' => 'New Vendor Risk',
                     'weight' => self::RULE_WEIGHTS['new_vendor'],
-                    'explanation' => "Vendor's first transaction was seen on {$earliestVendorDate->format('Y-m-d')}, which is within 30 days of the company's latest transaction date ({$latestCompanyDate->format('Y-m-d')})."
+                    'explanation' => "Vendor's first transaction was seen on {$earliestVendorDate->format('Y-m-d')}, which is within 30 days of the company's latest transaction date ({$latestCompanyDate->format('Y-m-d')}).",
                 ];
                 $totalScore += self::RULE_WEIGHTS['new_vendor'];
                 $supportingEvidence['new_vendor'] = [
@@ -85,7 +82,7 @@ class VendorRiskScoringService
                 'rule_key' => 'vendor_concentration',
                 'name' => 'Vendor Concentration Risk',
                 'weight' => self::RULE_WEIGHTS['vendor_concentration'],
-                'explanation' => "Vendor spend of $" . number_format($vendorSpend, 2) . " represents {$percentage}% of total company spend ($" . number_format($totalCompanySpend, 2) . ")."
+                'explanation' => 'Vendor spend of $'.number_format($vendorSpend, 2)." represents {$percentage}% of total company spend ($".number_format($totalCompanySpend, 2).').',
             ];
             $totalScore += self::RULE_WEIGHTS['vendor_concentration'];
             $supportingEvidence['vendor_concentration'] = [
@@ -105,18 +102,18 @@ class VendorRiskScoringService
                 if ($diffDays <= 7 && $txn->amount >= 2500.00) {
                     $rapidTxns[] = [
                         'id' => $txn->id,
-                        'amount' => (float)$txn->amount,
+                        'amount' => (float) $txn->amount,
                         'date' => $txnDate->format('Y-m-d'),
                     ];
                 }
             }
 
-            if (!empty($rapidTxns)) {
+            if (! empty($rapidTxns)) {
                 $triggeredRules[] = [
                     'rule_key' => 'rapid_payment',
                     'name' => 'Rapid Payment after Onboarding',
                     'weight' => self::RULE_WEIGHTS['rapid_payment'],
-                    'explanation' => "High-value payment(s) >= $2,500.00 were processed within 7 days of the vendor's first appearance."
+                    'explanation' => "High-value payment(s) >= $2,500.00 were processed within 7 days of the vendor's first appearance.",
                 ];
                 $totalScore += self::RULE_WEIGHTS['rapid_payment'];
                 $supportingEvidence['rapid_payment'] = [
@@ -142,13 +139,13 @@ class VendorRiskScoringService
             }
         }
 
-        if (!empty($similarVendors)) {
+        if (! empty($similarVendors)) {
             $names = implode(', ', array_column($similarVendors, 'name'));
             $triggeredRules[] = [
                 'rule_key' => 'similar_vendor_name',
                 'name' => 'Duplicate/Similar Vendor Names',
                 'weight' => self::RULE_WEIGHTS['similar_vendor_name'],
-                'explanation' => "Vendor name '{$vendorName}' is highly similar to other existing vendor(s): {$names}."
+                'explanation' => "Vendor name '{$vendorName}' is highly similar to other existing vendor(s): {$names}.",
             ];
             $totalScore += self::RULE_WEIGHTS['similar_vendor_name'];
             $supportingEvidence['similar_vendor_name'] = [
@@ -161,7 +158,7 @@ class VendorRiskScoringService
         $roundCount = 0;
         $roundTxns = [];
         foreach ($vendorTxns as $txn) {
-            $amount = (float)$txn->amount;
+            $amount = (float) $txn->amount;
             if ($amount > 0 && fmod($amount, 100.0) == 0.0) {
                 $roundCount++;
                 $roundTxns[] = [
@@ -178,7 +175,7 @@ class VendorRiskScoringService
                 'rule_key' => 'round_dollar',
                 'name' => 'Round-Dollar Payment Patterns',
                 'weight' => self::RULE_WEIGHTS['round_dollar'],
-                'explanation' => "{$roundCount} out of {$totalCount} payments (" . round($roundPercentage, 2) . "%) are round-dollar amounts (multiples of $100.00)."
+                'explanation' => "{$roundCount} out of {$totalCount} payments (".round($roundPercentage, 2).'%) are round-dollar amounts (multiples of $100.00).',
             ];
             $totalScore += self::RULE_WEIGHTS['round_dollar'];
             $supportingEvidence['round_dollar'] = [
@@ -209,9 +206,9 @@ class VendorRiskScoringService
                 }
             }
             if (count($group) >= 2) {
-                $splitGroups[] = array_map(fn($t) => [
+                $splitGroups[] = array_map(fn ($t) => [
                     'id' => $t->id,
-                    'amount' => (float)$t->amount,
+                    'amount' => (float) $t->amount,
                     'date' => Carbon::parse($t->date)->format('Y-m-d'),
                 ], $group);
                 $triggeredSplitting = true;
@@ -223,7 +220,7 @@ class VendorRiskScoringService
                 'rule_key' => 'threshold_splitting',
                 'name' => 'Threshold Splitting Behavior',
                 'weight' => self::RULE_WEIGHTS['threshold_splitting'],
-                'explanation' => "Detected multiple payments just under the $5,000.00 approval threshold within a 5-day window."
+                'explanation' => 'Detected multiple payments just under the $5,000.00 approval threshold within a 5-day window.',
             ];
             $totalScore += self::RULE_WEIGHTS['threshold_splitting'];
             $supportingEvidence['threshold_splitting'] = [
@@ -239,19 +236,19 @@ class VendorRiskScoringService
             if ($dayOfWeek >= 6) {
                 $weekendTxns[] = [
                     'id' => $txn->id,
-                    'amount' => (float)$txn->amount,
+                    'amount' => (float) $txn->amount,
                     'date' => $dt->format('Y-m-d'),
                     'day_of_week' => $dayOfWeek == 6 ? 'Saturday' : 'Sunday',
                 ];
             }
         }
 
-        if (!empty($weekendTxns)) {
+        if (! empty($weekendTxns)) {
             $triggeredRules[] = [
                 'rule_key' => 'unusual_timing',
                 'name' => 'Unusual Payment Timing',
                 'weight' => self::RULE_WEIGHTS['unusual_timing'],
-                'explanation' => "Detected transaction(s) processed on a weekend (Saturday or Sunday)."
+                'explanation' => 'Detected transaction(s) processed on a weekend (Saturday or Sunday).',
             ];
             $totalScore += self::RULE_WEIGHTS['unusual_timing'];
             $supportingEvidence['unusual_timing'] = [
@@ -260,11 +257,11 @@ class VendorRiskScoringService
         }
 
         // --- RULE 8: Shared Payment/Account Indicators (Weight: 15) ---
-        $sharedAlerts = Alert::where('company_id', $companyId)
+        $sharedAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->where('status', 'open')
             ->where(function ($query) use ($vendorName) {
                 $query->where('title', 'like', "%{$vendorName}%")
-                      ->orWhere('detail', 'like', "%{$vendorName}%");
+                    ->orWhere('detail', 'like', "%{$vendorName}%");
             })
             ->get();
 
@@ -277,12 +274,12 @@ class VendorRiskScoringService
             ];
         }
 
-        if (!empty($sharedIndicators)) {
+        if (! empty($sharedIndicators)) {
             $triggeredRules[] = [
                 'rule_key' => 'shared_payment_indicators',
                 'name' => 'Shared Payment/Account Indicators',
                 'weight' => self::RULE_WEIGHTS['shared_payment_indicators'],
-                'explanation' => "System alerts indicate this vendor has shared payment credentials or other shared entity indicators."
+                'explanation' => 'System alerts indicate this vendor has shared payment credentials or other shared entity indicators.',
             ];
             $totalScore += self::RULE_WEIGHTS['shared_payment_indicators'];
             $supportingEvidence['shared_payment_indicators'] = [
@@ -294,6 +291,7 @@ class VendorRiskScoringService
 
         return [
             'vendor_name' => $vendorName,
+            'business_profile_id' => $businessProfileId,
             'vendor_risk_score' => $finalScore,
             'risk_level' => $this->riskLevel($finalScore),
             'triggered_rules' => $triggeredRules,
@@ -308,9 +306,16 @@ class VendorRiskScoringService
      */
     private function riskLevel(int $score): string
     {
-        if ($score >= 90) return 'critical';
-        if ($score >= 70) return 'high';
-        if ($score >= 40) return 'medium';
+        if ($score >= 90) {
+            return 'critical';
+        }
+        if ($score >= 70) {
+            return 'high';
+        }
+        if ($score >= 40) {
+            return 'medium';
+        }
+
         return 'low';
     }
 
@@ -328,16 +333,18 @@ class VendorRiskScoringService
         if ($score >= 40) {
             return 'Flag vendor for routine periodic audit. Standard validation of the next two scheduled payments.';
         }
+
         return 'No immediate actions required. Continue routine automated continuous monitoring.';
     }
 
     /**
      * Safe empty response when no transactions are found.
      */
-    private function emptyVendorResponse(string $vendorName): array
+    private function emptyVendorResponse(string $vendorName, ?string $businessProfileId = null): array
     {
         return [
             'vendor_name' => $vendorName,
+            'business_profile_id' => $businessProfileId,
             'vendor_risk_score' => 0,
             'risk_level' => 'low',
             'triggered_rules' => [],
@@ -349,20 +356,21 @@ class VendorRiskScoringService
 
     /**
      * Compute scores for all unique vendors of a company.
-     *
-     * @param string $companyId
-     * @return array
      */
-    public function scoreAllVendors(string $companyId): array
+    public function scoreAllVendors(string $companyId, ?string $businessProfileId = null): array
     {
-        return Cache::remember("risk_score:vendor:{$companyId}", 300, function () use ($companyId): array {
-            return $this->computeAllVendors($companyId);
+        $cacheKey = $businessProfileId
+            ? "risk_score:vendor:{$companyId}:profile:{$businessProfileId}"
+            : "risk_score:vendor:{$companyId}";
+
+        return Cache::remember($cacheKey, 300, function () use ($companyId, $businessProfileId): array {
+            return $this->computeAllVendors($companyId, $businessProfileId);
         });
     }
 
-    private function computeAllVendors(string $companyId): array
+    private function computeAllVendors(string $companyId, ?string $businessProfileId = null): array
     {
-        $vendors = Transaction::where('company_id', $companyId)
+        $vendors = $this->transactionQuery($companyId, $businessProfileId)
             ->whereNotNull('vendor_customer')
             ->where('vendor_customer', '<>', '')
             ->distinct()
@@ -370,7 +378,7 @@ class VendorRiskScoringService
 
         $scores = [];
         foreach ($vendors as $vendor) {
-            $scores[] = $this->scoreVendor($companyId, $vendor);
+            $scores[] = $this->scoreVendor($companyId, $vendor, $businessProfileId);
         }
 
         // Sort by score descending, then alphabetically by vendor name
@@ -379,9 +387,28 @@ class VendorRiskScoringService
             if ($scoreDiff !== 0) {
                 return $scoreDiff;
             }
+
             return strcmp($a['vendor_name'], $b['vendor_name']);
         });
 
         return $scores;
+    }
+
+    private function transactionQuery(string $companyId, ?string $businessProfileId = null): Builder
+    {
+        return Transaction::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('transactions', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
+    }
+
+    private function alertQuery(string $companyId, ?string $businessProfileId = null): Builder
+    {
+        return Alert::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
     }
 }

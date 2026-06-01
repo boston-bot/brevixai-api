@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Alert;
 use App\Models\AlertGroup;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AlertService
 {
@@ -17,29 +18,32 @@ class AlertService
     /**
      * List alerts with optional filters.
      */
-    public function list(string $companyId, array $filters = [], bool $skipCompute = false): array
+    public function list(string $companyId, array $filters = [], bool $skipCompute = false, ?string $businessProfileId = null): array
     {
-        if (!$skipCompute) {
+        if (! $skipCompute) {
             $this->updateAllScores($companyId);
             $this->groupRelatedAlerts($companyId);
         }
 
-        $limit = min((int)($filters['limit'] ?? 50), 100);
-        $offset = max((int)($filters['offset'] ?? 0), 0);
+        $limit = min((int) ($filters['limit'] ?? 50), 100);
+        $offset = max((int) ($filters['offset'] ?? 0), 0);
 
         $query = Alert::where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('alerts', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
 
-        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
             $query->where('status', $filters['status']);
         }
-        if (!empty($filters['severity'])) {
+        if (! empty($filters['severity'])) {
             $query->where('severity', $filters['severity']);
         }
-        if (!empty($filters['rule_key'])) {
+        if (! empty($filters['rule_key'])) {
             $query->where('rule_key', $filters['rule_key']);
         }
 
-        if (($filters['sort'] ?? 'priority') === 'priority') {
+        if (($filters['sort'] ?? 'priority') === 'priority' && Schema::hasColumn('alerts', 'priority_score')) {
             $query->orderBy('priority_score', 'desc')->orderBy('created_at', 'desc');
         } else {
             $query->orderByRaw(
@@ -49,10 +53,15 @@ class AlertService
 
         $alerts = $query->offset($offset)->limit($limit)->get();
 
-        $countRows = DB::select(
-            "SELECT status, COUNT(*)::int AS count FROM alerts WHERE company_id = ? GROUP BY status",
-            [$companyId]
-        );
+        $countRows = DB::table('alerts')
+            ->where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            )
+            ->select('status', DB::raw('COUNT(*) AS count'))
+            ->groupBy('status')
+            ->get();
 
         $counts = [];
         $total = 0;
@@ -75,16 +84,16 @@ class AlertService
     {
         $alert = Alert::where('id', $alertId)->where('company_id', $companyId)->first();
 
-        if (!$alert) {
+        if (! $alert) {
             return null;
         }
 
         $transactions = [];
         $evidence = is_array($alert->evidence) ? $alert->evidence : [];
-        if (!empty($evidence['transactionIds'])) {
+        if (! empty($evidence['transactionIds'])) {
             $transactions = DB::select(
-                "SELECT * FROM all_transactions WHERE company_id = ? AND id = ANY(?::uuid[])",
-                [$companyId, '{' . implode(',', $evidence['transactionIds']) . '}']
+                'SELECT * FROM all_transactions WHERE company_id = ? AND id = ANY(?::uuid[])',
+                [$companyId, '{'.implode(',', $evidence['transactionIds']).'}']
             );
         }
 
@@ -101,7 +110,7 @@ class AlertService
     {
         $alert = Alert::where('id', $alertId)->where('company_id', $companyId)->first();
 
-        if (!$alert) {
+        if (! $alert) {
             return null;
         }
 
@@ -134,7 +143,9 @@ class AlertService
     private function calculateAlertPriority(string $alertId, string $companyId): int
     {
         $alert = Alert::where('id', $alertId)->where('company_id', $companyId)->first();
-        if (!$alert) return 50;
+        if (! $alert) {
+            return 50;
+        }
 
         // 1. Base Severity Score
         $score = self::DEFAULT_WEIGHTS['severity'][$alert->severity] ?? 10;
@@ -154,11 +165,11 @@ class AlertService
 
         // 4. Pattern Repeat Boost
         $vendors = $evidence['vendors'] ?? [];
-        if (!empty($vendors)) {
+        if (! empty($vendors)) {
             $repeatCount = DB::selectOne(
                 "SELECT COUNT(*)::int as count FROM alerts 
                  WHERE company_id = ? AND rule_key = ? AND id != ?
-                 AND evidence->'vendors' ?| array[" . implode(',', array_map(fn($v) => "'$v'", $vendors)) . "]
+                 AND evidence->'vendors' ?| array[".implode(',', array_map(fn ($v) => "'$v'", $vendors))."]
                  AND created_at > NOW() - INTERVAL '90 days'",
                 [$companyId, $alert->rule_key, $alertId]
             );
@@ -191,14 +202,16 @@ class AlertService
             ->whereNull('group_id')
             ->get();
 
-        if ($alerts->count() < 2) return;
+        if ($alerts->count() < 2) {
+            return;
+        }
 
         $vendorGroups = [];
         foreach ($alerts as $alert) {
             $evidence = is_array($alert->evidence) ? $alert->evidence : [];
             $vendors = $evidence['vendors'] ?? [];
             foreach ($vendors as $vendor) {
-                if (!isset($vendorGroups[$vendor])) {
+                if (! isset($vendorGroups[$vendor])) {
                     $vendorGroups[$vendor] = [];
                 }
                 $vendorGroups[$vendor][] = $alert->id;
@@ -206,12 +219,14 @@ class AlertService
         }
 
         foreach ($vendorGroups as $vendor => $alertIds) {
-            if (count($alertIds) < 2) continue;
+            if (count($alertIds) < 2) {
+                continue;
+            }
 
             $groupAlerts = DB::select(
                 "SELECT severity, (SELECT COALESCE(SUM(v::numeric), 0) FROM jsonb_array_elements(evidence->'amounts') v) as amount
                  FROM alerts WHERE id = ANY(?::uuid[])",
-                ['{' . implode(',', $alertIds) . '}']
+                ['{'.implode(',', $alertIds).'}']
             );
 
             $totalImpact = 0;
@@ -220,12 +235,16 @@ class AlertService
 
             foreach ($groupAlerts as $ga) {
                 $totalImpact += (float) $ga->amount;
-                if ($ga->severity === 'critical') $hasCritical = true;
-                if ($ga->severity === 'warning') $hasWarning = true;
+                if ($ga->severity === 'critical') {
+                    $hasCritical = true;
+                }
+                if ($ga->severity === 'warning') {
+                    $hasWarning = true;
+                }
             }
 
             $maxSeverity = $hasCritical ? 'critical' : ($hasWarning ? 'warning' : 'info');
-            $title = "Security Cluster: " . count($alertIds) . " anomalies for {$vendor}";
+            $title = 'Security Cluster: '.count($alertIds)." anomalies for {$vendor}";
 
             $group = AlertGroup::create([
                 'company_id' => $companyId,

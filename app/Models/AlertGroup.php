@@ -13,7 +13,7 @@ class AlertGroup extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'company_id', 'title', 'alert_count', 'max_severity', 'total_impact',
+        'company_id', 'business_profile_id', 'title', 'alert_count', 'max_severity', 'total_impact',
     ];
 
     protected $casts = [

@@ -610,6 +610,9 @@ class InvestigationEvidenceLedgerTest extends TestCase
             'alert_recommendations',
             'recommendation_review_events',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

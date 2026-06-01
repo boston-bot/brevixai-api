@@ -32,18 +32,19 @@ class CaseRecommendationReviewService
         string $userId,
         string $recommendationId,
         string $actorType = RecommendationReviewEvent::ACTOR_USER,
+        ?string $businessProfileId = null,
     ): ?array {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $actorType): ?array {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $actorType, $businessProfileId): ?array {
             $this->assertHumanReviewer($companyId, $userId, $actorType);
 
-            $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
+            $recommendation = $this->lockedRecommendation($companyId, $recommendationId, $businessProfileId);
             if (! $recommendation) {
                 return null;
             }
 
             $this->ensurePendingReview($recommendation);
 
-            $case = AuditCase::create([
+            $casePayload = [
                 'company_id' => $recommendation->company_id,
                 'case_recommendation_id' => $recommendation->id,
                 'title' => $recommendation->title,
@@ -51,9 +52,14 @@ class CaseRecommendationReviewService
                 'severity' => $recommendation->severity,
                 'status' => 'open',
                 'created_by' => $userId,
-            ]);
+            ];
+            if (Schema::hasColumn('audit_cases', 'business_profile_id')) {
+                $casePayload['business_profile_id'] = $recommendation->business_profile_id;
+            }
 
-            AuditCaseEvent::create([
+            $case = AuditCase::create($casePayload);
+
+            $caseEventPayload = [
                 'case_id' => $case->id,
                 'company_id' => $companyId,
                 'user_id' => $userId,
@@ -64,7 +70,12 @@ class CaseRecommendationReviewService
                     'source_risk_domains' => $recommendation->source_risk_domains ?? [],
                     'related_alert_recommendation_ids' => $recommendation->related_alert_recommendation_ids ?? [],
                 ],
-            ]);
+            ];
+            if (Schema::hasColumn('audit_case_events', 'business_profile_id')) {
+                $caseEventPayload['business_profile_id'] = $recommendation->business_profile_id;
+            }
+
+            AuditCaseEvent::create($caseEventPayload);
 
             if (Schema::hasTable('investigation_activity_events')) {
                 $this->investigationService->recordActivity(
@@ -79,6 +90,7 @@ class CaseRecommendationReviewService
                         'case_type' => $recommendation->case_type,
                         'source_risk_domains' => $recommendation->source_risk_domains ?? [],
                         'confidence_score' => $recommendation->confidence_score,
+                        'business_profile_id' => $recommendation->business_profile_id,
                     ],
                 );
             }
@@ -99,6 +111,7 @@ class CaseRecommendationReviewService
                             'case_type' => $recommendation->case_type,
                             'confidence_score' => $recommendation->confidence_score,
                             'source_risk_domains' => $recommendation->source_risk_domains ?? [],
+                            'business_profile_id' => $recommendation->business_profile_id,
                         ],
                     ],
                 );
@@ -122,6 +135,7 @@ class CaseRecommendationReviewService
                     'case_type' => $recommendation->case_type,
                     'severity' => $recommendation->severity,
                 ],
+                businessProfileId: $businessProfileId,
             );
 
             return [
@@ -139,11 +153,12 @@ class CaseRecommendationReviewService
         string $recommendationId,
         ?string $reviewNote = null,
         string $actorType = RecommendationReviewEvent::ACTOR_USER,
+        ?string $businessProfileId = null,
     ): ?array {
-        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote, $actorType): ?array {
+        return DB::transaction(function () use ($companyId, $userId, $recommendationId, $reviewNote, $actorType, $businessProfileId): ?array {
             $this->assertHumanReviewer($companyId, $userId, $actorType);
 
-            $recommendation = $this->lockedRecommendation($companyId, $recommendationId);
+            $recommendation = $this->lockedRecommendation($companyId, $recommendationId, $businessProfileId);
             if (! $recommendation) {
                 return null;
             }
@@ -169,6 +184,7 @@ class CaseRecommendationReviewService
                     'severity' => $recommendation->severity,
                     'has_review_note' => $reviewNote !== null && $reviewNote !== '',
                 ],
+                businessProfileId: $businessProfileId,
             );
 
             return [
@@ -179,10 +195,14 @@ class CaseRecommendationReviewService
         });
     }
 
-    private function lockedRecommendation(string $companyId, string $recommendationId): ?CaseRecommendation
+    private function lockedRecommendation(string $companyId, string $recommendationId, ?string $businessProfileId): ?CaseRecommendation
     {
         return CaseRecommendation::where('company_id', $companyId)
             ->where('id', $recommendationId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('case_recommendations', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            )
             ->lockForUpdate()
             ->first();
     }

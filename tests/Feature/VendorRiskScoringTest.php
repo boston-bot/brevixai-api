@@ -2,11 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\Alert;
-use App\Models\Company;
 use App\Models\Transaction;
-use App\Models\Upload;
-use App\Models\User;
 use App\Services\Agents\VendorRiskScoringService;
 use Database\Seeders\FraudScenarioSeeders\Phase1AgentFraudScenarioSeeder;
 use Illuminate\Database\Schema\Blueprint;
@@ -90,7 +86,7 @@ class VendorRiskScoringTest extends TestCase
     public function test_duplicate_vendor_similarity(): void
     {
         // Add a mock similar vendor transaction to trigger the similarity rule by assigning properties directly
-        $txn = new Transaction();
+        $txn = new Transaction;
         $txn->id = '66666666-9999-4666-8666-666666666666';
         $txn->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $txn->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -125,7 +121,7 @@ class VendorRiskScoringTest extends TestCase
         );
 
         $this->assertSame('Clean Vendor', $result['vendor_name']);
-        
+
         // Clean Vendor is first seen on 2026-05-15, which is the latest date in the entire ledger,
         // so it will naturally trigger 'new_vendor' risk rule deterministically (and correctly).
         // However, it should NOT trigger other fraud patterns (like duplicate, splitting, concentration, or round dollar).
@@ -146,13 +142,13 @@ class VendorRiskScoringTest extends TestCase
     public function test_vendor_risk_api_endpoint_structure_and_auth(): void
     {
         // 1. Assert auth protection (requires token)
-        $unauth = $this->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/vendor-risk');
+        $unauth = $this->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/vendor-risk');
         $unauth->assertStatus(401); // Unauthorized by agent.tool middleware if token is missing
 
         // 2. Access with valid token and fetch all vendors
         $response = $this->withToken('test-agent-key')
             ->withHeader('X-Brevix-User-Id', Phase1AgentFraudScenarioSeeder::USER_ID)
-            ->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/vendor-risk');
+            ->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/vendor-risk');
 
         $response->assertOk();
         $response->assertJsonStructure([
@@ -164,15 +160,15 @@ class VendorRiskScoringTest extends TestCase
                     'triggered_rules',
                     'rule_weights',
                     'supporting_evidence',
-                    'recommended_next_action'
-                ]
-            ]
+                    'recommended_next_action',
+                ],
+            ],
         ]);
 
         // 3. Access with specific vendor name
         $singleResponse = $this->withToken('test-agent-key')
             ->withHeader('X-Brevix-User-Id', Phase1AgentFraudScenarioSeeder::USER_ID)
-            ->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/vendor-risk?vendor=Roundhouse Services');
+            ->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/vendor-risk?vendor=Roundhouse Services');
 
         $singleResponse->assertOk();
         $singleResponse->assertJsonStructure([
@@ -182,7 +178,7 @@ class VendorRiskScoringTest extends TestCase
             'triggered_rules',
             'rule_weights',
             'supporting_evidence',
-            'recommended_next_action'
+            'recommended_next_action',
         ]);
 
         $this->assertSame('Roundhouse Services', $singleResponse->json('vendor_name'));
@@ -217,6 +213,9 @@ class VendorRiskScoringTest extends TestCase
             'reconciliation_results',
             'transactions',
             'uploads',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

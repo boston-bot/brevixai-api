@@ -8,6 +8,7 @@ use App\Models\RecommendationReviewEvent;
 use App\Models\User;
 use App\Services\AlertRecommendationReviewService;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -96,6 +97,46 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             'title' => 'Review vendor risk signals',
             'source_system' => 'deterministic_recommendation_engine',
             'source_recommendation_id' => $recommendation->id,
+        ]);
+    }
+
+    public function test_approval_is_scoped_to_active_business_profile(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $this->createBusinessProfileSchema();
+        $profileA = $this->createBusinessProfile($company->id, 'Profile A');
+        $profileB = $this->createBusinessProfile($company->id, 'Profile B');
+        $recommendation = $this->createRecommendation($company->id, [
+            'business_profile_id' => $profileB,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson(
+            "/api/alert-recommendations/{$recommendation->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileA],
+        )->assertNotFound();
+
+        $this->assertDatabaseCount('alerts', 0);
+        $this->assertDatabaseHas('alert_recommendations', [
+            'id' => $recommendation->id,
+            'status' => AlertRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+
+        $this->postJson(
+            "/api/alert-recommendations/{$recommendation->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileB],
+        )
+            ->assertOk()
+            ->assertJsonPath('alert.business_profile_id', $profileB)
+            ->assertJsonPath('recommendation.business_profile_id', $profileB);
+
+        $this->assertDatabaseHas('alerts', [
+            'company_id' => $company->id,
+            'business_profile_id' => $profileB,
+            'alert_recommendation_id' => $recommendation->id,
         ]);
     }
 
@@ -325,6 +366,9 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             'alerts',
             'alert_recommendations',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {
@@ -364,6 +408,7 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
         Schema::create('alert_recommendations', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->text('source_risk_domain');
             $table->text('alert_type');
             $table->text('severity');
@@ -382,6 +427,7 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
         Schema::create('alerts', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->uuid('group_id')->nullable();
             $table->foreignUuid('alert_recommendation_id')->nullable();
             $table->text('rule_key');
@@ -401,5 +447,34 @@ class AlertRecommendationReviewWorkflowTest extends TestCase
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
         });
+    }
+
+    private function createBusinessProfileSchema(): void
+    {
+        Schema::create('business_profiles', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->string('name');
+            $table->boolean('is_default')->default(false);
+            $table->string('status')->default('active');
+            $table->timestamps();
+        });
+    }
+
+    private function createBusinessProfile(string $companyId, string $name): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('business_profiles')->insert([
+            'id' => $id,
+            'company_id' => $companyId,
+            'name' => $name,
+            'is_default' => false,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
     }
 }

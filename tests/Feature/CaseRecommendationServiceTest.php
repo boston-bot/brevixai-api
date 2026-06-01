@@ -14,6 +14,7 @@ use App\Services\Agents\ReconciliationRiskScoringService;
 use App\Services\Agents\VendorRiskScoringService;
 use App\Services\CaseRecommendationReviewService;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -94,6 +95,52 @@ class CaseRecommendationServiceTest extends TestCase
             'id' => $recommendation->id,
             'status' => CaseRecommendation::STATUS_APPROVED,
             'reviewed_by_user_id' => $user->id,
+        ]);
+    }
+
+    public function test_approval_is_scoped_to_active_business_profile(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $this->createBusinessProfileSchema();
+        $profileA = $this->createBusinessProfile($company->id, 'Profile A');
+        $profileB = $this->createBusinessProfile($company->id, 'Profile B');
+        $recommendation = $this->createCaseRecommendation($company->id, [
+            'business_profile_id' => $profileB,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson(
+            "/api/case-recommendations/{$recommendation->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileA],
+        )->assertNotFound();
+
+        $this->assertDatabaseCount('audit_cases', 0);
+        $this->assertDatabaseHas('case_recommendations', [
+            'id' => $recommendation->id,
+            'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
+        ]);
+
+        $response = $this->postJson(
+            "/api/case-recommendations/{$recommendation->id}/approve",
+            [],
+            ['X-Brevix-Business-Profile-Id' => $profileB],
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('case.business_profile_id', $profileB)
+            ->assertJsonPath('recommendation.business_profile_id', $profileB);
+
+        $this->assertDatabaseHas('audit_cases', [
+            'company_id' => $company->id,
+            'business_profile_id' => $profileB,
+            'case_recommendation_id' => $recommendation->id,
+        ]);
+        $this->assertDatabaseHas('audit_case_events', [
+            'company_id' => $company->id,
+            'business_profile_id' => $profileB,
+            'case_id' => $response->json('case.id'),
         ]);
     }
 
@@ -352,7 +399,7 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $scores) {}
 
-            public function scoreAllVendors(string $companyId): array
+            public function scoreAllVendors(string $companyId, ?string $businessProfileId = null): array
             {
                 return $this->scores;
             }
@@ -362,7 +409,7 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $risk) {}
 
-            public function scoreReconciliation(string $companyId): array
+            public function scoreReconciliation(string $companyId, ?string $businessProfileId = null): array
             {
                 return array_merge(['company_id' => $companyId], $this->risk);
             }
@@ -372,7 +419,7 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $risk) {}
 
-            public function scoreEntityRelationships(string $companyId): array
+            public function scoreEntityRelationships(string $companyId, ?string $businessProfileId = null): array
             {
                 return array_merge(['company_id' => $companyId], $this->risk);
             }
@@ -382,7 +429,7 @@ class CaseRecommendationServiceTest extends TestCase
         {
             public function __construct(private readonly array $summary) {}
 
-            public function getAggregateRiskSummary(string $companyId): array
+            public function getAggregateRiskSummary(string $companyId, ?string $businessProfileId = null): array
             {
                 return array_merge(['company_id' => $companyId], $this->summary);
             }
@@ -538,6 +585,9 @@ class CaseRecommendationServiceTest extends TestCase
             'case_recommendations',
             'alert_recommendations',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {
@@ -577,6 +627,7 @@ class CaseRecommendationServiceTest extends TestCase
         Schema::create('alert_recommendations', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->text('source_risk_domain');
             $table->text('alert_type');
             $table->text('severity');
@@ -595,6 +646,7 @@ class CaseRecommendationServiceTest extends TestCase
         Schema::create('case_recommendations', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->text('case_type');
             $table->text('severity');
             $table->text('title');
@@ -615,6 +667,7 @@ class CaseRecommendationServiceTest extends TestCase
         Schema::create('audit_cases', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->foreignUuid('case_recommendation_id')->nullable();
             $table->text('title');
             $table->text('description')->nullable();
@@ -631,10 +684,40 @@ class CaseRecommendationServiceTest extends TestCase
             $table->uuid('id')->primary();
             $table->foreignUuid('case_id');
             $table->foreignUuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
             $table->foreignUuid('user_id')->nullable();
             $table->text('event_type');
             $table->json('payload');
             $table->timestamp('created_at')->nullable();
         });
+    }
+
+    private function createBusinessProfileSchema(): void
+    {
+        Schema::create('business_profiles', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->string('name');
+            $table->boolean('is_default')->default(false);
+            $table->string('status')->default('active');
+            $table->timestamps();
+        });
+    }
+
+    private function createBusinessProfile(string $companyId, string $name): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('business_profiles')->insert([
+            'id' => $id,
+            'company_id' => $companyId,
+            'name' => $name,
+            'is_default' => false,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
     }
 }

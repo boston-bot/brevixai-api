@@ -5,21 +5,27 @@ namespace App\Services\Agents;
 use App\Models\Alert;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class EntityRelationshipRiskScoringService
 {
     /**
      * Calculate entity relationship risk score and return structured explainable details.
      */
-    public function scoreEntityRelationships(string $companyId): array
+    public function scoreEntityRelationships(string $companyId, ?string $businessProfileId = null): array
     {
-        return Cache::remember("risk_score:entity_relationship:{$companyId}", 300, function () use ($companyId): array {
-            return $this->computeEntityRelationships($companyId);
+        $cacheKey = $businessProfileId
+            ? "risk_score:entity_relationship:{$companyId}:profile:{$businessProfileId}"
+            : "risk_score:entity_relationship:{$companyId}";
+
+        return Cache::remember($cacheKey, 300, function () use ($companyId, $businessProfileId): array {
+            return $this->computeEntityRelationships($companyId, $businessProfileId);
         });
     }
 
-    private function computeEntityRelationships(string $companyId): array
+    private function computeEntityRelationships(string $companyId, ?string $businessProfileId = null): array
     {
         $ruleWeights = [
             'employee_vendor_overlap' => 20,
@@ -42,15 +48,15 @@ class EntityRelationshipRiskScoringService
             if (empty($u->first_name) || empty($u->last_name)) {
                 continue;
             }
-            $fullName = trim($u->first_name . ' ' . $u->last_name);
-            
-            $matches = Transaction::where('company_id', $companyId)
+            $fullName = trim($u->first_name.' '.$u->last_name);
+
+            $matches = $this->transactionQuery($companyId, $businessProfileId)
                 ->where(function ($q) use ($fullName, $u) {
-                    $q->where('vendor_customer', 'like', '%' . $fullName . '%')
-                      ->orWhere('vendor_customer', 'like', '%' . $u->email . '%');
+                    $q->where('vendor_customer', 'like', '%'.$fullName.'%')
+                        ->orWhere('vendor_customer', 'like', '%'.$u->email.'%');
                 })
                 ->get();
-                
+
             if ($matches->isNotEmpty()) {
                 $uniqueVendors = $matches->pluck('vendor_customer')->unique()->values()->all();
                 $overlaps[] = [
@@ -69,7 +75,7 @@ class EntityRelationshipRiskScoringService
                 }
             }
         }
-        if (!empty($overlaps)) {
+        if (! empty($overlaps)) {
             $triggeredRules[] = [
                 'rule_key' => 'employee_vendor_overlap',
                 'name' => 'Employee/Vendor Overlap',
@@ -82,12 +88,12 @@ class EntityRelationshipRiskScoringService
         }
 
         // 2. Shared Bank Account Indicators
-        $bankingAlerts = Alert::where('company_id', $companyId)
+        $bankingAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->whereNotIn('status', ['resolved', 'dismissed'])
             ->where(function ($q) {
                 $q->where('rule_key', '=', 'shared_bank_account')
-                  ->orWhere('title', 'like', '%shared bank account%')
-                  ->orWhere('detail', 'like', '%shared bank account%');
+                    ->orWhere('title', 'like', '%shared bank account%')
+                    ->orWhere('detail', 'like', '%shared bank account%');
             })
             ->get();
         if ($bankingAlerts->isNotEmpty()) {
@@ -98,7 +104,7 @@ class EntityRelationshipRiskScoringService
                 'explanation' => 'Active system alerts indicating multiple unique vendors sharing identical banking routes or accounts.',
             ];
             $supportingEvidence['shared_bank_account'] = [
-                'alerts' => $bankingAlerts->map(fn($a) => [
+                'alerts' => $bankingAlerts->map(fn ($a) => [
                     'id' => $a->id,
                     'title' => $a->title,
                     'detail' => $a->detail,
@@ -115,12 +121,12 @@ class EntityRelationshipRiskScoringService
         }
 
         // 3. Shared Address Indicators
-        $addressAlerts = Alert::where('company_id', $companyId)
+        $addressAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->whereNotIn('status', ['resolved', 'dismissed'])
             ->where(function ($q) {
                 $q->where('rule_key', '=', 'shared_address')
-                  ->orWhere('title', 'like', '%shared address%')
-                  ->orWhere('detail', 'like', '%shared address%');
+                    ->orWhere('title', 'like', '%shared address%')
+                    ->orWhere('detail', 'like', '%shared address%');
             })
             ->get();
         if ($addressAlerts->isNotEmpty()) {
@@ -131,7 +137,7 @@ class EntityRelationshipRiskScoringService
                 'explanation' => 'Active system alerts indicating multiple unique vendors or employees sharing identical billing/physical addresses.',
             ];
             $supportingEvidence['shared_address'] = [
-                'alerts' => $addressAlerts->map(fn($a) => [
+                'alerts' => $addressAlerts->map(fn ($a) => [
                     'id' => $a->id,
                     'title' => $a->title,
                     'detail' => $a->detail,
@@ -148,14 +154,14 @@ class EntityRelationshipRiskScoringService
         }
 
         // 4. Shared Phone/Email Indicators
-        $contactAlerts = Alert::where('company_id', $companyId)
+        $contactAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->whereNotIn('status', ['resolved', 'dismissed'])
             ->where(function ($q) {
                 $q->where('rule_key', '=', 'shared_phone_email')
-                  ->orWhere('title', 'like', '%shared phone%')
-                  ->orWhere('title', 'like', '%shared email%')
-                  ->orWhere('detail', 'like', '%shared phone%')
-                  ->orWhere('detail', 'like', '%shared email%');
+                    ->orWhere('title', 'like', '%shared phone%')
+                    ->orWhere('title', 'like', '%shared email%')
+                    ->orWhere('detail', 'like', '%shared phone%')
+                    ->orWhere('detail', 'like', '%shared email%');
             })
             ->get();
         if ($contactAlerts->isNotEmpty()) {
@@ -166,7 +172,7 @@ class EntityRelationshipRiskScoringService
                 'explanation' => 'Active system alerts indicating multiple unique vendors sharing identical contact numbers or email domains.',
             ];
             $supportingEvidence['shared_phone_email'] = [
-                'alerts' => $contactAlerts->map(fn($a) => [
+                'alerts' => $contactAlerts->map(fn ($a) => [
                     'id' => $a->id,
                     'title' => $a->title,
                     'detail' => $a->detail,
@@ -183,7 +189,7 @@ class EntityRelationshipRiskScoringService
         }
 
         // 5. Duplicate Vendor Identity Clusters
-        $vendors = Transaction::where('company_id', $companyId)
+        $vendors = $this->transactionQuery($companyId, $businessProfileId)
             ->whereNotNull('vendor_customer')
             ->pluck('vendor_customer')
             ->unique()
@@ -218,7 +224,7 @@ class EntityRelationshipRiskScoringService
                 ];
             }
         }
-        if (!empty($clusters)) {
+        if (! empty($clusters)) {
             $triggeredRules[] = [
                 'rule_key' => 'duplicate_vendor_cluster',
                 'name' => 'Duplicate Vendor Identity Clusters',
@@ -231,12 +237,12 @@ class EntityRelationshipRiskScoringService
         }
 
         // 6. Vendor-to-Vendor Payment Relationships
-        $vendorVendorAlerts = Alert::where('company_id', $companyId)
+        $vendorVendorAlerts = $this->alertQuery($companyId, $businessProfileId)
             ->whereNotIn('status', ['resolved', 'dismissed'])
             ->where(function ($q) {
                 $q->where('rule_key', '=', 'vendor_vendor_payment')
-                  ->orWhere('title', 'like', '%vendor-to-vendor%')
-                  ->orWhere('detail', 'like', '%vendor-to-vendor%');
+                    ->orWhere('title', 'like', '%vendor-to-vendor%')
+                    ->orWhere('detail', 'like', '%vendor-to-vendor%');
             })
             ->get();
         if ($vendorVendorAlerts->isNotEmpty()) {
@@ -247,7 +253,7 @@ class EntityRelationshipRiskScoringService
                 'explanation' => 'Active system alerts indicating transactions routed between vendor accounts, bypassing standard ledger paths.',
             ];
             $supportingEvidence['vendor_vendor_payment'] = [
-                'alerts' => $vendorVendorAlerts->map(fn($a) => [
+                'alerts' => $vendorVendorAlerts->map(fn ($a) => [
                     'id' => $a->id,
                     'title' => $a->title,
                     'detail' => $a->detail,
@@ -264,24 +270,24 @@ class EntityRelationshipRiskScoringService
         }
 
         // 7. Unusual Concentration Within Related Entities
-        $totalCompanySpend = Transaction::where('company_id', $companyId)->sum('amount');
+        $totalCompanySpend = $this->transactionQuery($companyId, $businessProfileId)->sum('amount');
         $concentrationAlerts = [];
-        if ($totalCompanySpend > 0 && !empty($clusters)) {
+        if ($totalCompanySpend > 0 && ! empty($clusters)) {
             foreach ($clusters as $cluster) {
-                $clusterSpend = Transaction::where('company_id', $companyId)
+                $clusterSpend = $this->transactionQuery($companyId, $businessProfileId)
                     ->whereIn('vendor_customer', $cluster)
                     ->sum('amount');
                 $pct = ($clusterSpend / $totalCompanySpend) * 100;
                 if ($pct >= 15.0) {
                     $concentrationAlerts[] = [
                         'cluster' => $cluster,
-                        'spend' => (float)$clusterSpend,
+                        'spend' => (float) $clusterSpend,
                         'percentage' => round($pct, 2),
                     ];
                 }
             }
         }
-        if (!empty($concentrationAlerts)) {
+        if (! empty($concentrationAlerts)) {
             $triggeredRules[] = [
                 'rule_key' => 'unusual_concentration',
                 'name' => 'Concentration in Related Entities',
@@ -322,6 +328,7 @@ class EntityRelationshipRiskScoringService
 
         return [
             'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
             'entity_relationship_risk_score' => $score,
             'risk_level' => $riskLevel,
             'triggered_rules' => $triggeredRules,
@@ -347,6 +354,25 @@ class EntityRelationshipRiskScoringService
                 return true;
             }
         }
+
         return false;
+    }
+
+    private function transactionQuery(string $companyId, ?string $businessProfileId = null): Builder
+    {
+        return Transaction::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('transactions', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
+    }
+
+    private function alertQuery(string $companyId, ?string $businessProfileId = null): Builder
+    {
+        return Alert::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
     }
 }

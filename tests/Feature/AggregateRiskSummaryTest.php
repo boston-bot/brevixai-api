@@ -57,7 +57,7 @@ class AggregateRiskSummaryTest extends TestCase
     public function test_mixed_risk_company(): void
     {
         // Medium Vendor Risk (triggers new_vendor (15) + concentration (20) + timing (10) + rapid payment (15) = 60)
-        $tx = new Transaction();
+        $tx = new Transaction;
         $tx->id = '88888888-0002-4999-9999-999999999999';
         $tx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -67,7 +67,7 @@ class AggregateRiskSummaryTest extends TestCase
         $tx->save();
 
         // Medium Entity Relationship Risk (e.g. employee/vendor overlap = 20)
-        $txOverlap = new Transaction();
+        $txOverlap = new Transaction;
         $txOverlap->id = '88888888-0003-4999-9999-999999999999';
         $txOverlap->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $txOverlap->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -90,7 +90,7 @@ class AggregateRiskSummaryTest extends TestCase
     public function test_high_vendor_plus_clean_reconciliation(): void
     {
         // Setup high vendor risk (triggers 95 overall)
-        $tx1 = new Transaction();
+        $tx1 = new Transaction;
         $tx1->id = '88888888-0004-4999-9999-999999999999';
         $tx1->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx1->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -99,7 +99,7 @@ class AggregateRiskSummaryTest extends TestCase
         $tx1->date = '2026-05-10'; // Sunday
         $tx1->save();
 
-        $tx2 = new Transaction();
+        $tx2 = new Transaction;
         $tx2->id = '88888888-0005-4999-9999-999999999999';
         $tx2->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx2->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -110,7 +110,7 @@ class AggregateRiskSummaryTest extends TestCase
 
         $result = $this->aggregateService->getAggregateRiskSummary(Phase1AgentFraudScenarioSeeder::COMPANY_ID);
 
-        $this->assertSame(95, $result['overall_risk_score']); 
+        $this->assertSame(95, $result['overall_risk_score']);
         $this->assertSame('critical', $result['overall_risk_level']);
         $this->assertSame(95, $result['contributing_risk_domains']['vendor_risk']['score']);
         $this->assertSame(0, $result['contributing_risk_domains']['reconciliation_risk']['score']);
@@ -122,7 +122,7 @@ class AggregateRiskSummaryTest extends TestCase
     public function test_high_entity_relationship_plus_medium_reconciliation(): void
     {
         // Setup shared bank account alert (Entity relationship = 20)
-        $alert = new Alert();
+        $alert = new Alert;
         $alert->id = '88888888-0006-4999-9999-999999999999';
         $alert->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $alert->rule_key = 'shared_bank_account';
@@ -134,7 +134,7 @@ class AggregateRiskSummaryTest extends TestCase
         $alert->save();
 
         // Setup reconciliation discrepancy (stale unreconciled withdrawal = 15)
-        $disc = new ReconciliationDiscrepancy();
+        $disc = new ReconciliationDiscrepancy;
         $disc->id = '88888888-0007-4999-9999-999999999999';
         $disc->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $disc->run_id = '88888888-0008-4999-9999-999999999999';
@@ -163,17 +163,17 @@ class AggregateRiskSummaryTest extends TestCase
     {
         // Seed multiple critical indicators across domains to yield overall score >= 90
         foreach ([
-            'shared_bank_account', 
-            'shared_address', 
-            'shared_phone_email', 
-            'vendor_vendor_payment'
+            'shared_bank_account',
+            'shared_address',
+            'shared_phone_email',
+            'vendor_vendor_payment',
         ] as $index => $key) {
-            $alert = new Alert();
+            $alert = new Alert;
             $alert->id = "88888888-100{$index}-4999-9999-999999999999";
             $alert->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
             $alert->rule_key = $key;
             $alert->severity = 'critical';
-            $alert->title = 'Anomaly ' . $key;
+            $alert->title = 'Anomaly '.$key;
             $alert->detail = 'Detailed anomaly description';
             $alert->evidence = ['metadata' => ['related_vendors' => ['Vendor A'], 'related_entities' => ['Vendor B']]];
             $alert->status = 'open';
@@ -181,7 +181,7 @@ class AggregateRiskSummaryTest extends TestCase
         }
 
         // Add two spelling-similar vendors to trigger cluster (15) and concentration (10) to reach 90+ overall
-        $tx1 = new Transaction();
+        $tx1 = new Transaction;
         $tx1->id = '88888888-2001-4999-9999-999999999999';
         $tx1->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx1->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -189,7 +189,7 @@ class AggregateRiskSummaryTest extends TestCase
         $tx1->amount = 1000.00;
         $tx1->save();
 
-        $tx2 = new Transaction();
+        $tx2 = new Transaction;
         $tx2->id = '88888888-2002-4999-9999-999999999999';
         $tx2->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx2->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -198,8 +198,8 @@ class AggregateRiskSummaryTest extends TestCase
         $tx2->save();
 
         // Adding more alerts and a transaction to push entity relationship risk above the 90 threshold
-        $alertExtra = new Alert();
-        $alertExtra->id = "88888888-1009-4999-9999-999999999999";
+        $alertExtra = new Alert;
+        $alertExtra->id = '88888888-1009-4999-9999-999999999999';
         $alertExtra->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $alertExtra->rule_key = 'shared_bank_account';
         $alertExtra->severity = 'critical';
@@ -210,7 +210,7 @@ class AggregateRiskSummaryTest extends TestCase
         $alertExtra->save();
 
         // Trigger Employee Vendor Overlap (20)
-        $txOverlap = new Transaction();
+        $txOverlap = new Transaction;
         $txOverlap->id = '88888888-2003-4999-9999-999999999999';
         $txOverlap->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $txOverlap->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -240,7 +240,7 @@ class AggregateRiskSummaryTest extends TestCase
      */
     public function test_backward_compatible_risk_summary_response_shape(): void
     {
-        $alert = new Alert();
+        $alert = new Alert;
         $alert->id = '88888888-0009-4999-9999-999999999999';
         $alert->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $alert->rule_key = 'duplicate_invoice';
@@ -253,7 +253,7 @@ class AggregateRiskSummaryTest extends TestCase
 
         $response = $this->withToken('test-agent-key')
             ->withHeader('X-Brevix-User-Id', Phase1AgentFraudScenarioSeeder::USER_ID)
-            ->getJson("/api/internal/agent-tools/companies/" . Phase1AgentFraudScenarioSeeder::COMPANY_ID . "/risk-summary?period=2026-05");
+            ->getJson('/api/internal/agent-tools/companies/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/risk-summary?period=2026-05');
 
         $response->assertOk()
             ->assertJsonStructure([
@@ -265,7 +265,7 @@ class AggregateRiskSummaryTest extends TestCase
                 'stats' => [
                     'totalTransactions',
                     'flaggedAlerts',
-                    'reconciliationMismatches'
+                    'reconciliationMismatches',
                 ],
                 'alert_breakdown',
                 'aggregate_summary' => [
@@ -277,7 +277,7 @@ class AggregateRiskSummaryTest extends TestCase
                     'triggered_rules_summary',
                     'recommended_next_actions',
                     'supporting_evidence_summary',
-                ]
+                ],
             ]);
     }
 
@@ -286,12 +286,12 @@ class AggregateRiskSummaryTest extends TestCase
      */
     public function test_api_endpoint_auth_and_structure(): void
     {
-        $this->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/aggregate-risk-summary')
+        $this->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/aggregate-risk-summary')
             ->assertStatus(401);
 
         $response = $this->withToken('test-agent-key')
             ->withHeader('X-Brevix-User-Id', Phase1AgentFraudScenarioSeeder::USER_ID)
-            ->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/aggregate-risk-summary');
+            ->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/aggregate-risk-summary');
 
         $response->assertOk()
             ->assertJsonStructure([
@@ -308,12 +308,12 @@ class AggregateRiskSummaryTest extends TestCase
 
     private function seedBaseData(): void
     {
-        $company = new Company();
+        $company = new Company;
         $company->id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $company->name = 'Acme Corp';
         $company->save();
 
-        $user = new User();
+        $user = new User;
         $user->id = Phase1AgentFraudScenarioSeeder::USER_ID;
         $user->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $user->email = 'admin@acme.com';
@@ -322,7 +322,7 @@ class AggregateRiskSummaryTest extends TestCase
         $user->last_name = 'User';
         $user->save();
 
-        $upload = new Upload();
+        $upload = new Upload;
         $upload->id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $upload->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $upload->uploaded_by = Phase1AgentFraudScenarioSeeder::USER_ID;
@@ -343,6 +343,9 @@ class AggregateRiskSummaryTest extends TestCase
             'reconciliation_results',
             'transactions',
             'uploads',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

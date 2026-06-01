@@ -5,14 +5,22 @@ namespace App\Services\Agents;
 use App\Models\Alert;
 use App\Models\ReconciliationDiscrepancy;
 use App\Models\Transaction;
+use Illuminate\Support\Facades\Schema;
 
 class AgentRiskAnalysisService
 {
-    public function riskSummary(string $companyId, ?string $period = null): array
+    public function riskSummary(string $companyId, ?string $period = null, ?string $businessProfileId = null): array
     {
         $alerts = Alert::where('company_id', $companyId)
-            ->where('status', 'open')
-            ->orderBy('priority_score', 'desc')
+            ->when(
+                $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            )
+            ->where('status', 'open');
+        if (Schema::hasColumn('alerts', 'priority_score')) {
+            $alerts->orderBy('priority_score', 'desc');
+        }
+        $alerts = $alerts
             ->orderBy('created_at', 'desc')
             ->limit(10)
             ->get();
@@ -23,21 +31,34 @@ class AgentRiskAnalysisService
         $riskScore = min(100, ($criticalCount * 20) + ($warningCount * 10) + ($infoCount * 4));
 
         $aggregateService = app(AggregateRiskSummaryService::class);
-        $aggregateResult = $aggregateService->getAggregateRiskSummary($companyId);
+        $aggregateResult = $aggregateService->getAggregateRiskSummary($companyId, $businessProfileId);
 
         $alertRecommendationService = app(AlertRecommendationService::class);
-        $alertRecommendations = $alertRecommendationService->getAlertRecommendations($companyId);
+        $alertRecommendations = $alertRecommendationService->getAlertRecommendations($companyId, $businessProfileId);
+
+        $transactionQuery = Transaction::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('transactions', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
+
+        $discrepancyQuery = ReconciliationDiscrepancy::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('reconciliation_discrepancies', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
 
         return [
             'company_id' => $companyId,
+            'business_profile_id' => $businessProfileId,
             'risk_score' => $riskScore,
             'risk_level' => $this->riskLevel($riskScore),
             'period' => $period ?: now()->format('Y-m'),
             'top_drivers' => $alerts->map(fn (Alert $alert): array => $this->alertDriver($alert))->values()->all(),
             'stats' => [
-                'totalTransactions' => Transaction::where('company_id', $companyId)->count(),
+                'totalTransactions' => $transactionQuery->count(),
                 'flaggedAlerts' => $alerts->count(),
-                'reconciliationMismatches' => ReconciliationDiscrepancy::where('company_id', $companyId)
+                'reconciliationMismatches' => $discrepancyQuery
                     ->whereNotIn('status', ['resolved', 'ignored'])
                     ->count(),
             ],

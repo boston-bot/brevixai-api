@@ -27,6 +27,9 @@ class AgentChatControllerTest extends TestCase
         Schema::dropIfExists('agent_action_approvals');
         Schema::dropIfExists('agent_steps');
         Schema::dropIfExists('agent_runs');
+        Schema::dropIfExists('business_profile_memberships');
+        Schema::dropIfExists('workspace_memberships');
+        Schema::dropIfExists('business_profiles');
         Schema::dropIfExists('users');
         Schema::dropIfExists('companies');
 
@@ -295,7 +298,7 @@ class AgentChatControllerTest extends TestCase
             $caseTool = $tools['case_recommendations'] ?? null;
 
             $pendingTool = $tools['pending_recommendations'] ?? null;
-            $detailTool  = $tools['transaction_detail'] ?? null;
+            $detailTool = $tools['transaction_detail'] ?? null;
 
             if (
                 ! is_array($aggregateTool)
@@ -315,28 +318,35 @@ class AgentChatControllerTest extends TestCase
                 && $contextTool['path'] === "/api/internal/agent-tools/companies/{$company->id}/context"
                 && $contextTool['optional'] === false
                 && $contextTool['deterministic'] === true
+                && $contextTool['requires_business_profile_context'] === true
+                && $contextTool['business_profile_header'] === 'X-Brevix-Business-Profile-Id'
                 && $riskTool['method'] === 'GET'
                 && $riskTool['path'] === "/api/internal/agent-tools/companies/{$company->id}/risk-summary"
                 && $riskTool['optional'] === false
                 && $riskTool['deterministic'] === true
+                && $riskTool['requires_business_profile_context'] === true
                 && $vendorTool['path'] === "/api/internal/agent-tools/company/{$company->id}/vendor-risk"
                 && $caseTool['path'] === "/api/internal/agent-tools/company/{$company->id}/case-recommendations"
                 && $aggregateTool['method'] === 'GET'
                 && $aggregateTool['path'] === "/api/internal/agent-tools/company/{$company->id}/aggregate-risk-summary"
                 && $aggregateTool['optional'] === true
                 && $aggregateTool['deterministic'] === true
+                && $aggregateTool['requires_business_profile_context'] === true
                 && $aggregateTool['score_authority'] === 'laravel'
                 && $alertTool['method'] === 'GET'
                 && $alertTool['path'] === "/api/internal/agent-tools/company/{$company->id}/alert-recommendations"
                 && $alertTool['optional'] === true
                 && $alertTool['deterministic'] === true
+                && $alertTool['requires_business_profile_context'] === true
                 && $alertTool['recommendation_authority'] === 'laravel'
                 && $pendingTool['path'] === "/api/internal/agent-tools/company/{$company->id}/pending-recommendations"
                 && $pendingTool['optional'] === true
                 && $pendingTool['deterministic'] === true
+                && $pendingTool['requires_business_profile_context'] === true
                 && $detailTool['path'] === "/api/internal/agent-tools/company/{$company->id}/transaction-detail"
                 && $detailTool['optional'] === true
                 && $detailTool['deterministic'] === true
+                && $detailTool['requires_business_profile_context'] === true
                 && ! array_key_exists('database_url', $aggregateTool)
                 && ! array_key_exists('database_url', $alertTool)
                 && $policy['database_access'] === 'forbidden'

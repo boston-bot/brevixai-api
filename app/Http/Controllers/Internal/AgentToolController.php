@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Internal;
 
+use App\Exceptions\BusinessProfileAccessException;
 use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\Transaction;
 use App\Models\Upload;
 use App\Models\User;
-use App\Services\BusinessProfileContextService;
 use App\Services\Agents\AgentActionExecutorService;
 use App\Services\Agents\AgentRiskAnalysisService;
 use App\Services\Agents\AggregateRiskSummaryService;
@@ -17,6 +17,8 @@ use App\Services\Agents\CaseRecommendationService;
 use App\Services\Agents\EntityRelationshipRiskScoringService;
 use App\Services\Agents\ReconciliationRiskScoringService;
 use App\Services\Agents\VendorRiskScoringService;
+use App\Services\BusinessProfileContext;
+use App\Services\BusinessProfileContextService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -40,6 +42,11 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         $transactionFilterError = $this->transactionFilterValidationError($request);
         if ($transactionFilterError) {
             return $transactionFilterError;
@@ -56,16 +63,18 @@ class AgentToolController extends Controller
                 'company_name' => $company->name,
                 'industry' => $company->industry,
                 'timezone' => config('app.timezone', 'UTC'),
-                'available_data_sources' => $this->availableDataSources($companyId, $this->businessProfileId($request)),
+                'business_profile_id' => $context->businessProfileId,
+                'business_profile_name' => $context->businessProfileName,
+                'available_data_sources' => $this->availableDataSources($context->companyId, $context->businessProfileId),
                 'user_role' => $user->role,
             ];
 
             if ($this->shouldIncludeTransactions($request)) {
-                $payload['transaction_summary'] = $this->transactionSummary($request, $companyId);
+                $payload['transaction_summary'] = $this->transactionSummary($request, $context->companyId, $context->businessProfileId);
             }
 
             if ($this->shouldIncludeDashboard($request)) {
-                $payload['dashboard_summary'] = $this->dashboardSummary($companyId);
+                $payload['dashboard_summary'] = $this->dashboardSummary($context->companyId, $context->businessProfileId);
             }
 
             return response()->json($payload);
@@ -85,6 +94,11 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         $period = $request->query('period');
         if ($period !== null && (! is_string($period) || ! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period))) {
             return response()->json(['error' => 'Invalid period. Use YYYY-MM.'], 422);
@@ -95,7 +109,7 @@ class AgentToolController extends Controller
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            return response()->json($riskAnalysisService->riskSummary($companyId, $period));
+            return response()->json($riskAnalysisService->riskSummary($context->companyId, $period, $context->businessProfileId));
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'risk_summary', $e);
         }
@@ -112,6 +126,11 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         $vendorName = $request->query('vendor');
 
         try {
@@ -120,12 +139,12 @@ class AgentToolController extends Controller
             }
 
             if ($vendorName !== null && $vendorName !== '') {
-                $result = $vendorRiskService->scoreVendor($companyId, $vendorName);
+                $result = $vendorRiskService->scoreVendor($context->companyId, $vendorName, $context->businessProfileId);
 
                 return response()->json($result);
             }
 
-            $result = $vendorRiskService->scoreAllVendors($companyId);
+            $result = $vendorRiskService->scoreAllVendors($context->companyId, $context->businessProfileId);
 
             return response()->json(['vendors' => $result]);
         } catch (Throwable $e) {
@@ -147,12 +166,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            $result = $reconciliationRiskService->scoreReconciliation($companyId);
+            $result = $reconciliationRiskService->scoreReconciliation($context->companyId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Throwable $e) {
@@ -174,12 +198,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            $result = $entityRelationshipRiskService->scoreEntityRelationships($companyId);
+            $result = $entityRelationshipRiskService->scoreEntityRelationships($context->companyId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Throwable $e) {
@@ -201,12 +230,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            $result = $aggregateRiskSummaryService->getAggregateRiskSummary($companyId);
+            $result = $aggregateRiskSummaryService->getAggregateRiskSummary($context->companyId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Throwable $e) {
@@ -228,12 +262,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            $result = $alertRecommendationService->getAlertRecommendations($companyId);
+            $result = $alertRecommendationService->getAlertRecommendations($context->companyId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Throwable $e) {
@@ -255,12 +294,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            $result = $caseRecommendationService->getCaseRecommendations($companyId);
+            $result = $caseRecommendationService->getCaseRecommendations($context->companyId, $context->businessProfileId);
 
             return response()->json($result);
         } catch (Throwable $e) {
@@ -279,6 +323,11 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         $transactionFilterError = $this->transactionFilterValidationError($request);
         if ($transactionFilterError) {
             return $transactionFilterError;
@@ -289,7 +338,7 @@ class AgentToolController extends Controller
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            return response()->json($this->transactionSummary($request, $companyId));
+            return response()->json($this->transactionSummary($request, $context->companyId, $context->businessProfileId));
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'transaction_lookup', $e);
         }
@@ -306,12 +355,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            return response()->json($this->dashboardSummary($companyId));
+            return response()->json($this->dashboardSummary($context->companyId, $context->businessProfileId));
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'dashboard_health', $e);
         }
@@ -361,16 +415,22 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            $alertResult = $alertRecommendationService->getAlertRecommendations($companyId);
-            $caseResult = $caseRecommendationService->getCaseRecommendations($companyId);
+            $alertResult = $alertRecommendationService->getAlertRecommendations($context->companyId, $context->businessProfileId);
+            $caseResult = $caseRecommendationService->getCaseRecommendations($context->companyId, $context->businessProfileId);
 
             return response()->json([
-                'company_id' => $companyId,
+                'company_id' => $context->companyId,
+                'business_profile_id' => $context->businessProfileId,
                 'alert_recommendations' => $alertResult['recommended_alerts'] ?? [],
                 'case_recommendations' => $caseResult['case_recommendations'] ?? [],
             ]);
@@ -388,6 +448,11 @@ class AgentToolController extends Controller
         $user = $this->authorizedUser($request, $companyId);
         if (! $user) {
             return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
         $ids = $request->query('ids');
@@ -412,6 +477,10 @@ class AgentToolController extends Controller
 
             $transactions = Transaction::where('company_id', $companyId)
                 ->whereIn('id', $ids)
+                ->when(
+                    $context->businessProfileId && Schema::hasColumn('transactions', 'business_profile_id'),
+                    fn ($query) => $query->where('business_profile_id', $context->businessProfileId),
+                )
                 ->get()
                 ->map(fn (Transaction $t): array => [
                     'id' => (string) $t->id,
@@ -429,7 +498,8 @@ class AgentToolController extends Controller
                 ->all();
 
             return response()->json([
-                'company_id' => $companyId,
+                'company_id' => $context->companyId,
+                'business_profile_id' => $context->businessProfileId,
                 'requested_count' => count($ids),
                 'found_count' => count($transactions),
                 'transactions' => $transactions,
@@ -453,12 +523,17 @@ class AgentToolController extends Controller
             return response()->json(['error' => 'User is not authorized for this company'], 403);
         }
 
+        $context = $this->profileContext($request, $companyId, $user);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
         try {
             if (! Company::where('id', $companyId)->exists()) {
                 return response()->json(['error' => 'Company not found'], 404);
             }
 
-            return response()->json($behavioralBaselineService->scoreDeviation($companyId));
+            return response()->json($behavioralBaselineService->scoreDeviation($context->companyId, $context->businessProfileId));
         } catch (Throwable $e) {
             return $this->safeToolFailure($request, $companyId, $user->id, 'behavioral_baseline', $e);
         }
@@ -513,7 +588,7 @@ class AgentToolController extends Controller
         return $date !== false && $date->format('Y-m-d') === $value;
     }
 
-    private function transactionSummary(Request $request, string $companyId): array
+    private function transactionSummary(Request $request, string $companyId, ?string $businessProfileId): array
     {
         $limit = min(max((int) $request->query('limit', 10), 1), 500);
         $filters = [
@@ -523,7 +598,6 @@ class AgentToolController extends Controller
 
         $query = DB::table('all_transactions')
             ->where('company_id', $companyId);
-        $businessProfileId = $this->businessProfileId($request);
         if ($businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id')) {
             $query->where('business_profile_id', $businessProfileId);
         }
@@ -558,6 +632,7 @@ class AgentToolController extends Controller
         return [
             'date_from' => $filters['date_from'],
             'date_to' => $filters['date_to'],
+            'business_profile_id' => $businessProfileId,
             'total' => (int) $total,
             'returned_count' => count($transactions),
             'transactions' => $transactions,
@@ -578,12 +653,11 @@ class AgentToolController extends Controller
         ];
     }
 
-    private function dashboardSummary(string $companyId): array
+    private function dashboardSummary(string $companyId, ?string $businessProfileId): array
     {
         $stats = DB::table('all_transactions')
             ->where('company_id', $companyId);
-        $businessProfileId = request()->header('X-Brevix-Business-Profile-Id');
-        if (is_string($businessProfileId) && $businessProfileId !== '' && Schema::hasColumn('all_transactions', 'business_profile_id')) {
+        if ($businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id')) {
             $stats->where('business_profile_id', $businessProfileId);
         }
 
@@ -596,7 +670,7 @@ class AgentToolController extends Controller
         $openAlerts = DB::table('alerts')
             ->where('company_id', $companyId)
             ->where('status', 'open');
-        if (is_string($businessProfileId) && $businessProfileId !== '' && Schema::hasColumn('alerts', 'business_profile_id')) {
+        if ($businessProfileId && Schema::hasColumn('alerts', 'business_profile_id')) {
             $openAlerts->where('business_profile_id', $businessProfileId);
         }
         $flaggedAlerts = (clone $openAlerts)->count();
@@ -604,6 +678,7 @@ class AgentToolController extends Controller
         $warningAlerts = (clone $openAlerts)->where('severity', 'warning')->count();
 
         return [
+            'business_profile_id' => $businessProfileId,
             'risk_score' => min(
                 100,
                 ((int) $criticalAlerts * 20)
@@ -629,22 +704,24 @@ class AgentToolController extends Controller
             return null;
         }
 
-        $businessProfileId = $this->businessProfileId($request);
-        if ($businessProfileId) {
-            try {
-                $this->businessProfileContext->contextForProfile($user, $businessProfileId, $companyId);
-
-                return $user;
-            } catch (\Throwable) {
-                return null;
-            }
-        }
-
         if ((string) $user->company_id === $companyId) {
             return $user;
         }
 
         return $this->businessProfileContext->workspaceRole($user, $companyId) ? $user : null;
+    }
+
+    private function profileContext(Request $request, string $companyId, User $user): BusinessProfileContext|JsonResponse
+    {
+        try {
+            return $this->businessProfileContext->resolveForUser(
+                $user,
+                $companyId,
+                $this->businessProfileId($request),
+            );
+        } catch (BusinessProfileAccessException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->statusCode());
+        }
     }
 
     private function availableDataSources(string $companyId, ?string $businessProfileId = null): array

@@ -27,6 +27,7 @@ class AlertRecommendation extends Model
 
     protected $fillable = [
         'company_id',
+        'business_profile_id',
         'source_risk_domain',
         'alert_type',
         'severity',

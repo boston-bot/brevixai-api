@@ -39,7 +39,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_clean_entity_relationships(): void
     {
         // Add a single unique clean transaction to populate DB
-        $tx = new Transaction();
+        $tx = new Transaction;
         $tx->id = '99999999-0001-4999-9999-999999999999';
         $tx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -61,7 +61,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_employee_vendor_overlap(): void
     {
         // Add a transaction where the vendor matches the employee name ("Test User")
-        $tx = new Transaction();
+        $tx = new Transaction;
         $tx->id = '99999999-0002-4999-9999-999999999999';
         $tx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -74,7 +74,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
         $this->assertSame(20, $result['entity_relationship_risk_score']);
         $triggeredKeys = array_column($result['triggered_rules'], 'rule_key');
         $this->assertContains('employee_vendor_overlap', $triggeredKeys);
-        
+
         $overlaps = $result['supporting_evidence']['employee_vendor_overlap']['overlaps'];
         $this->assertNotEmpty($overlaps);
         $this->assertSame('Test User', $overlaps[0]['employee_name']);
@@ -87,7 +87,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_shared_bank_account(): void
     {
         // Create an alert indicating shared bank account
-        $alert = new Alert();
+        $alert = new Alert;
         $alert->id = '99999999-0003-4999-9999-999999999999';
         $alert->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $alert->rule_key = 'shared_bank_account';
@@ -116,7 +116,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_duplicate_vendor_cluster(): void
     {
         // Seed two closely spelling-similar vendor transactions
-        $tx1 = new Transaction();
+        $tx1 = new Transaction;
         $tx1->id = '99999999-0004-4999-9999-999999999999';
         $tx1->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx1->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -124,7 +124,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
         $tx1->amount = 3000.00;
         $tx1->save();
 
-        $tx2 = new Transaction();
+        $tx2 = new Transaction;
         $tx2->id = '99999999-0005-4999-9999-999999999999';
         $tx2->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx2->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -147,7 +147,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_shared_address(): void
     {
         // Seed shared address alert
-        $alert = new Alert();
+        $alert = new Alert;
         $alert->id = '99999999-0006-4999-9999-999999999999';
         $alert->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $alert->rule_key = 'shared_address';
@@ -171,7 +171,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_no_false_positive_on_common_public_data(): void
     {
         // Seed two common public data vendor names with similar spellings
-        $tx1 = new Transaction();
+        $tx1 = new Transaction;
         $tx1->id = '99999999-0007-4999-9999-999999999999';
         $tx1->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx1->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -179,7 +179,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
         $tx1->amount = 150.00;
         $tx1->save();
 
-        $tx2 = new Transaction();
+        $tx2 = new Transaction;
         $tx2->id = '99999999-0008-4999-9999-999999999999';
         $tx2->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx2->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -198,7 +198,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
      */
     public function test_stable_scoring_consistency(): void
     {
-        $tx = new Transaction();
+        $tx = new Transaction;
         $tx->id = '99999999-0009-4999-9999-999999999999';
         $tx->upload_id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $tx->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
@@ -218,13 +218,13 @@ class EntityRelationshipRiskScoringTest extends TestCase
     public function test_api_endpoint_auth_and_structure(): void
     {
         // 1. Assert unauthorized without token
-        $this->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/entity-relationship-risk')
+        $this->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/entity-relationship-risk')
             ->assertStatus(401);
 
         // 2. Access with valid token and assert structure
         $response = $this->withToken('test-agent-key')
             ->withHeader('X-Brevix-User-Id', Phase1AgentFraudScenarioSeeder::USER_ID)
-            ->getJson('/api/internal/agent-tools/company/' . Phase1AgentFraudScenarioSeeder::COMPANY_ID . '/entity-relationship-risk');
+            ->getJson('/api/internal/agent-tools/company/'.Phase1AgentFraudScenarioSeeder::COMPANY_ID.'/entity-relationship-risk');
 
         $response->assertOk()
             ->assertJsonStructure([
@@ -235,20 +235,20 @@ class EntityRelationshipRiskScoringTest extends TestCase
                 'rule_weights',
                 'supporting_evidence',
                 'related_entities',
-                'recommended_next_action'
+                'recommended_next_action',
             ]);
     }
 
     private function seedBaseData(): void
     {
         // Seed Company
-        $company = new Company();
+        $company = new Company;
         $company->id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $company->name = 'Acme Corp';
         $company->save();
 
         // Seed User
-        $user = new User();
+        $user = new User;
         $user->id = Phase1AgentFraudScenarioSeeder::USER_ID;
         $user->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $user->email = 'admin@acme.com';
@@ -258,7 +258,7 @@ class EntityRelationshipRiskScoringTest extends TestCase
         $user->save();
 
         // Seed Upload
-        $upload = new Upload();
+        $upload = new Upload;
         $upload->id = Phase1AgentFraudScenarioSeeder::UPLOAD_ID;
         $upload->company_id = Phase1AgentFraudScenarioSeeder::COMPANY_ID;
         $upload->uploaded_by = Phase1AgentFraudScenarioSeeder::USER_ID;
@@ -278,6 +278,9 @@ class EntityRelationshipRiskScoringTest extends TestCase
             'reconciliation_results',
             'transactions',
             'uploads',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {

@@ -255,7 +255,7 @@ class AlertRecommendationsUITest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $response = $this->postJson('/api/alert-recommendations/' . Str::uuid() . '/approve');
+        $response = $this->postJson('/api/alert-recommendations/'.Str::uuid().'/approve');
 
         $response->assertNotFound();
 
@@ -272,7 +272,7 @@ class AlertRecommendationsUITest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $response = $this->postJson('/api/alert-recommendations/' . Str::uuid() . '/dismiss');
+        $response = $this->postJson('/api/alert-recommendations/'.Str::uuid().'/dismiss');
 
         $response->assertNotFound();
 
@@ -408,7 +408,7 @@ class AlertRecommendationsUITest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createRecommendation(string $companyId, array $overrides = []): AlertRecommendation
     {
@@ -428,7 +428,7 @@ class AlertRecommendationsUITest extends TestCase
 
     private function createSchema(): void
     {
-        foreach (['alerts', 'alert_recommendations', 'personal_access_tokens', 'users', 'companies'] as $table) {
+        foreach (['alerts', 'alert_recommendations', 'personal_access_tokens', 'business_profile_memberships', 'workspace_memberships', 'business_profiles', 'users', 'companies'] as $table) {
             Schema::dropIfExists($table);
         }
 

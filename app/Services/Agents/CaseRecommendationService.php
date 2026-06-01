@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\CaseRecommendation;
 use App\Models\RecommendationReviewEvent;
 use App\Services\RecommendationReviewAuditService;
+use Illuminate\Support\Facades\Schema;
 
 class CaseRecommendationService
 {
@@ -42,13 +43,13 @@ class CaseRecommendationService
      *
      * @return array<string, mixed>
      */
-    public function getCaseRecommendations(string $companyId): array
+    public function getCaseRecommendations(string $companyId, ?string $businessProfileId = null): array
     {
-        $aggregateSummary = $this->aggregateRiskSummaryService->getAggregateRiskSummary($companyId);
-        $alertRecommendations = $this->alertRecommendationService->getAlertRecommendations($companyId);
-        $vendorScores = $this->vendorRiskScoringService->scoreAllVendors($companyId);
-        $reconciliationRisk = $this->reconciliationRiskScoringService->scoreReconciliation($companyId);
-        $entityRelationshipRisk = $this->entityRelationshipRiskScoringService->scoreEntityRelationships($companyId);
+        $aggregateSummary = $this->aggregateRiskSummaryService->getAggregateRiskSummary($companyId, $businessProfileId);
+        $alertRecommendations = $this->alertRecommendationService->getAlertRecommendations($companyId, $businessProfileId);
+        $vendorScores = $this->vendorRiskScoringService->scoreAllVendors($companyId, $businessProfileId);
+        $reconciliationRisk = $this->reconciliationRiskScoringService->scoreReconciliation($companyId, $businessProfileId);
+        $entityRelationshipRisk = $this->entityRelationshipRiskScoringService->scoreEntityRelationships($companyId, $businessProfileId);
 
         $recommendations = $this->buildRecommendations(
             $aggregateSummary,
@@ -60,7 +61,8 @@ class CaseRecommendationService
 
         return [
             'company_id' => $companyId,
-            'case_recommendations' => $this->persistRecommendations($companyId, $recommendations),
+            'business_profile_id' => $businessProfileId,
+            'case_recommendations' => $this->persistRecommendations($companyId, $recommendations, $businessProfileId),
         ];
     }
 
@@ -405,7 +407,7 @@ class CaseRecommendationService
      * @param  array<int, array<string, mixed>>  $recommendations
      * @return array<int, array<string, mixed>>
      */
-    private function persistRecommendations(string $companyId, array $recommendations): array
+    private function persistRecommendations(string $companyId, array $recommendations, ?string $businessProfileId = null): array
     {
         $persisted = [];
         $activeKeys = [];
@@ -415,6 +417,10 @@ class CaseRecommendationService
             $activeKeys[] = $caseType;
 
             $record = CaseRecommendation::where('company_id', $companyId)
+                ->when(
+                    $businessProfileId && Schema::hasColumn('case_recommendations', 'business_profile_id'),
+                    fn ($query) => $query->where('business_profile_id', $businessProfileId),
+                )
                 ->where('case_type', $caseType)
                 ->where('status', CaseRecommendation::STATUS_PENDING_REVIEW)
                 ->first();
@@ -425,6 +431,10 @@ class CaseRecommendationService
                     'case_type' => $caseType,
                     'status' => CaseRecommendation::STATUS_PENDING_REVIEW,
                 ]);
+            }
+
+            if ($businessProfileId && Schema::hasColumn('case_recommendations', 'business_profile_id')) {
+                $record->business_profile_id = $businessProfileId;
             }
 
             $isNewRecommendation = ! $record->exists;
@@ -457,13 +467,14 @@ class CaseRecommendationService
                         'related_alert_recommendation_ids' => $record->related_alert_recommendation_ids ?? [],
                         'confidence_score' => $record->confidence_score,
                     ],
+                    businessProfileId: $businessProfileId,
                 );
             }
 
             $persisted[] = $this->recommendationPayload($record);
         }
 
-        $this->expireStalePendingRecommendations($companyId, $activeKeys);
+        $this->expireStalePendingRecommendations($companyId, $activeKeys, $businessProfileId);
 
         return $persisted;
     }
@@ -471,13 +482,17 @@ class CaseRecommendationService
     /**
      * @param  array<int, string>  $activeKeys
      */
-    private function expireStalePendingRecommendations(string $companyId, array $activeKeys): void
+    private function expireStalePendingRecommendations(string $companyId, array $activeKeys, ?string $businessProfileId = null): void
     {
         CaseRecommendation::where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('case_recommendations', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            )
             ->where('status', CaseRecommendation::STATUS_PENDING_REVIEW)
             ->whereIn('case_type', self::MANAGED_CASE_TYPES)
             ->get()
-            ->each(function (CaseRecommendation $recommendation) use ($activeKeys): void {
+            ->each(function (CaseRecommendation $recommendation) use ($activeKeys, $businessProfileId): void {
                 if (! in_array($recommendation->case_type, $activeKeys, true)) {
                     $recommendation->update(['status' => CaseRecommendation::STATUS_EXPIRED]);
 
@@ -491,6 +506,7 @@ class CaseRecommendationService
                             'case_type' => $recommendation->case_type,
                             'source_risk_domains' => $recommendation->source_risk_domains ?? [],
                         ],
+                        businessProfileId: $businessProfileId,
                     );
                 }
             });
@@ -503,6 +519,7 @@ class CaseRecommendationService
     {
         return [
             'id' => $recommendation->id,
+            'business_profile_id' => $recommendation->business_profile_id ?? null,
             'case_type' => $recommendation->case_type,
             'severity' => $recommendation->severity,
             'title' => $recommendation->title,

@@ -83,22 +83,26 @@ class BusinessProfileContextService
             throw new BusinessProfileAccessException('No workspace associated with account.', 403);
         }
 
+        return $this->resolveForUser($user, $workspaceId, $this->requestedBusinessProfileId($request));
+    }
+
+    public function resolveForUser(User $user, string $companyId, ?string $businessProfileId = null): BusinessProfileContext
+    {
         if (! Schema::hasTable('business_profiles')) {
-            return new BusinessProfileContext($workspaceId, null, (string) ($user->role ?? 'owner'));
+            return new BusinessProfileContext($companyId, null, (string) ($user->role ?? 'owner'));
         }
 
-        $profileId = $this->requestedBusinessProfileId($request);
-        if ($profileId) {
-            return $this->contextForProfile($user, $profileId, $workspaceId);
+        if ($businessProfileId) {
+            return $this->contextForProfile($user, $businessProfileId, $companyId);
         }
 
-        $profiles = $this->profilesForUser($user, $workspaceId);
+        $profiles = $this->profilesForUser($user, $companyId);
 
         if (count($profiles) === 1) {
             $profile = $profiles[0];
 
             return new BusinessProfileContext(
-                $workspaceId,
+                $companyId,
                 $profile['id'],
                 $profile['role'],
                 $profile['name'],

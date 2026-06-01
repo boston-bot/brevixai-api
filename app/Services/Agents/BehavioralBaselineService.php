@@ -2,16 +2,18 @@
 
 namespace App\Services\Agents;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class BehavioralBaselineService
 {
     private const BASELINE_DAYS = 90;
 
     private const DEVIATION_WEIGHTS = [
-        'weekly_spend'   => 0.40,
-        'vendor_count'   => 0.25,
-        'payment_freq'   => 0.20,
+        'weekly_spend' => 0.40,
+        'vendor_count' => 0.25,
+        'payment_freq' => 0.20,
         'category_shift' => 0.15,
     ];
 
@@ -27,12 +29,11 @@ class BehavioralBaselineService
      *     transaction_count: int
      * }
      */
-    public function computeBaseline(string $companyId, string $period): array
+    public function computeBaseline(string $companyId, string $period, ?string $businessProfileId = null): array
     {
         $cutoff = now()->subDays(self::BASELINE_DAYS)->toDateString();
 
-        $rows = DB::table('all_transactions')
-            ->where('company_id', $companyId)
+        $rows = $this->transactionQuery($companyId, $businessProfileId)
             ->whereDate('date', '>=', $cutoff)
             ->select(['date', 'amount', 'vendor_customer', 'category', 'payment_method'])
             ->get();
@@ -67,12 +68,12 @@ class BehavioralBaselineService
             ->all();
 
         return [
-            'avg_weekly_spend'              => round((float) $weeklySpend, 2),
-            'avg_vendor_count'              => round((float) $avgVendorCount, 1),
-            'top_categories'                => $topCategories,
+            'avg_weekly_spend' => round((float) $weeklySpend, 2),
+            'avg_vendor_count' => round((float) $avgVendorCount, 1),
+            'top_categories' => $topCategories,
             'payment_frequency_distribution' => $paymentDist,
-            'baseline_period_days'          => self::BASELINE_DAYS,
-            'transaction_count'             => $rows->count(),
+            'baseline_period_days' => self::BASELINE_DAYS,
+            'transaction_count' => $rows->count(),
         ];
     }
 
@@ -87,23 +88,24 @@ class BehavioralBaselineService
      *     current: array<string, mixed>
      * }
      */
-    public function scoreDeviation(string $companyId): array
+    public function scoreDeviation(string $companyId, ?string $businessProfileId = null): array
     {
         $period = now()->format('Y-m');
-        $baseline = $this->computeBaseline($companyId, $period);
+        $baseline = $this->computeBaseline($companyId, $period, $businessProfileId);
 
         if ($baseline['transaction_count'] === 0) {
             return [
+                'business_profile_id' => $businessProfileId,
                 'deviation_score' => 0,
-                'risk_level'      => 'info',
-                'anomalies'       => [],
-                'baseline'        => $baseline,
-                'current'         => [],
+                'risk_level' => 'info',
+                'anomalies' => [],
+                'baseline' => $baseline,
+                'current' => [],
             ];
         }
 
         // Current 30-day window
-        $current = $this->currentPeriodStats($companyId);
+        $current = $this->currentPeriodStats($companyId, $businessProfileId);
         $anomalies = [];
         $scores = [];
 
@@ -114,9 +116,9 @@ class BehavioralBaselineService
             if ($spendRatio > 0.30) {
                 $direction = $current['avg_weekly_spend'] > $baseline['avg_weekly_spend'] ? 'higher' : 'lower';
                 $anomalies[] = [
-                    'dimension'   => 'weekly_spend',
+                    'dimension' => 'weekly_spend',
                     'description' => sprintf('Weekly spend is %.0f%% %s than the 90-day baseline.', $spendRatio * 100, $direction),
-                    'severity'    => $spendRatio > 0.60 ? 'high' : 'medium',
+                    'severity' => $spendRatio > 0.60 ? 'high' : 'medium',
                 ];
             }
         } else {
@@ -130,9 +132,9 @@ class BehavioralBaselineService
             if ($vendorRatio > 0.40) {
                 $direction = $current['vendor_count'] > $baseline['avg_vendor_count'] ? 'more' : 'fewer';
                 $anomalies[] = [
-                    'dimension'   => 'vendor_count',
+                    'dimension' => 'vendor_count',
                     'description' => sprintf('Activity involves %.0f%% %s vendors than usual.', $vendorRatio * 100, $direction),
-                    'severity'    => 'medium',
+                    'severity' => 'medium',
                 ];
             }
         } else {
@@ -146,9 +148,9 @@ class BehavioralBaselineService
         $scores['payment_freq'] = min(100, (int) round($distDrift * 100));
         if ($distDrift > 0.25) {
             $anomalies[] = [
-                'dimension'   => 'payment_frequency',
+                'dimension' => 'payment_frequency',
                 'description' => 'Payment method mix has shifted significantly from the established pattern.',
-                'severity'    => 'low',
+                'severity' => 'low',
             ];
         }
 
@@ -159,9 +161,9 @@ class BehavioralBaselineService
             if (! in_array(strtolower((string) $cat), $baselineTop, true)) {
                 $scores['category_shift'] = min(100, $scores['category_shift'] + 20);
                 $anomalies[] = [
-                    'dimension'   => 'category_shift',
+                    'dimension' => 'category_shift',
                     'description' => "Category '{$cat}' is a top spend area but was not in the 90-day baseline.",
-                    'severity'    => 'low',
+                    'severity' => 'low',
                 ];
             }
         }
@@ -174,20 +176,20 @@ class BehavioralBaselineService
         $deviationScore = min(100, (int) round($deviationScore));
 
         return [
+            'business_profile_id' => $businessProfileId,
             'deviation_score' => $deviationScore,
-            'risk_level'      => $this->riskLevel($deviationScore),
-            'anomalies'       => $anomalies,
-            'baseline'        => $baseline,
-            'current'         => $current,
+            'risk_level' => $this->riskLevel($deviationScore),
+            'anomalies' => $anomalies,
+            'baseline' => $baseline,
+            'current' => $current,
         ];
     }
 
-    private function currentPeriodStats(string $companyId): array
+    private function currentPeriodStats(string $companyId, ?string $businessProfileId = null): array
     {
         $cutoff = now()->subDays(30)->toDateString();
 
-        $rows = DB::table('all_transactions')
-            ->where('company_id', $companyId)
+        $rows = $this->transactionQuery($companyId, $businessProfileId)
             ->whereDate('date', '>=', $cutoff)
             ->select(['date', 'amount', 'vendor_customer', 'category', 'payment_method'])
             ->get();
@@ -214,9 +216,9 @@ class BehavioralBaselineService
             ->all();
 
         return [
-            'avg_weekly_spend'              => round((float) $weeklySpend, 2),
-            'vendor_count'                  => $rows->pluck('vendor_customer')->unique()->count(),
-            'top_categories'                => $topCategories,
+            'avg_weekly_spend' => round((float) $weeklySpend, 2),
+            'vendor_count' => $rows->pluck('vendor_customer')->unique()->count(),
+            'top_categories' => $topCategories,
             'payment_frequency_distribution' => $paymentDist,
         ];
     }
@@ -234,21 +236,38 @@ class BehavioralBaselineService
 
     private function riskLevel(int $score): string
     {
-        if ($score >= 75) return 'high';
-        if ($score >= 50) return 'medium';
-        if ($score >= 25) return 'low';
+        if ($score >= 75) {
+            return 'high';
+        }
+        if ($score >= 50) {
+            return 'medium';
+        }
+        if ($score >= 25) {
+            return 'low';
+        }
+
         return 'info';
     }
 
     private function emptyBaseline(): array
     {
         return [
-            'avg_weekly_spend'              => 0.0,
-            'avg_vendor_count'              => 0.0,
-            'top_categories'                => [],
+            'avg_weekly_spend' => 0.0,
+            'avg_vendor_count' => 0.0,
+            'top_categories' => [],
             'payment_frequency_distribution' => [],
-            'baseline_period_days'          => self::BASELINE_DAYS,
-            'transaction_count'             => 0,
+            'baseline_period_days' => self::BASELINE_DAYS,
+            'transaction_count' => 0,
         ];
+    }
+
+    private function transactionQuery(string $companyId, ?string $businessProfileId = null): Builder
+    {
+        return DB::table('all_transactions')
+            ->where('company_id', $companyId)
+            ->when(
+                $businessProfileId && Schema::hasColumn('all_transactions', 'business_profile_id'),
+                fn ($query) => $query->where('business_profile_id', $businessProfileId),
+            );
     }
 }

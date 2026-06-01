@@ -342,6 +342,9 @@ class RecommendationExpirationWorkflowTest extends TestCase
             'case_recommendations',
             'alert_recommendations',
             'personal_access_tokens',
+            'business_profile_memberships',
+            'workspace_memberships',
+            'business_profiles',
             'users',
             'companies',
         ] as $table) {
