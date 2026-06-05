@@ -32,6 +32,7 @@ The older Python orchestrator inside the frontend repo is not the active product
 | Investigations | Yes | No | No direct agent write access by design | User workflow ready; agent can only recommend upstream actions |
 | Transactions | Yes | Yes: `transactions` | Partial: bounded transaction lookup through company context | Read-only ready; agent analysis limited to bounded summaries |
 | Reconciliation | Yes | Yes: `reconciliation` | Yes: `reconciliation_risk` | Read/risk ready; run workflow is not exposed as an agent process |
+| Entity graph | Yes | Yes: `entity_graph_review` | Yes: `entity_relationship_risk` | Production graph intelligence is unblocked; public graph routes, Rex process routing, and Laravel agent-tool payload routes are covered by `php artisan smoke:check` |
 | AR aging | Yes | Yes: `ar` | No dedicated agent process | Read-only ready through Laravel orchestrator |
 | Controls | Yes | Yes: `controls` | No dedicated agent process | Read-only ready through Laravel orchestrator |
 | Uploads | Yes | No | No | User workflow only; should not be LLM-driven |
@@ -51,6 +52,9 @@ Laravel advertises these deterministic tools to the agent service:
 - `aggregate_risk_summary`
 - `alert_recommendations`
 - `case_recommendations`
+- `pending_recommendations`
+- `transaction_detail`
+- `process_registry`
 
 Tool policy remains:
 
@@ -65,7 +69,7 @@ Tool policy remains:
 2. The agent service request model currently treats Laravel-advertised tool metadata as compatibility payload. The active graph still uses its hard-coded Laravel tool client.
 3. Rex session chat and standalone Rex workspace use different paths. Session chat streams through `/api/chat/sessions/{sessionId}/messages`; standalone Rex posts to `/api/chat/agent/messages`.
 4. Persisted `agent_action_approvals` are created for sensitive recommendations, but the standalone Rex UI currently renders those as review-only local actions rather than a full confirm-and-execute flow.
-5. Several frontend pages still reference API routes that are not in the Laravel route list, including legacy reports, legal escalation, entity graph, clients, alert create-case/dismiss-pattern, transaction create-case, reconciliation run, and upload row errors.
+5. Several frontend pages still reference API routes that are not in the Laravel route list, including legacy reports, legal escalation, clients, alert create-case/dismiss-pattern, transaction create-case, and reconciliation run. Entity graph and upload row errors are now backed by Laravel routes and smoke/feature coverage.
 
 ## Readiness Bar
 
