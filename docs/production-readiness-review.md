@@ -10,20 +10,24 @@ Scope:
 
 ## Claude Handoff Snapshot
 
-Last updated: 2026-05-24 (third session)
+Last updated: 2026-06-05 (Phase 3 frontend approval integration)
 
 Current state:
 
-- `brevixai-api` is on `ready-review`; working tree has uncommitted Wave 1 changes from this session (PRR-007, tracker update, .env fix). Commit before next handoff.
-- `brevixai` is on `main`; working tree has uncommitted Wave 1 changes from this session (PRR-001 venv untrack, PRR-005 landing redirect, PRR-006 CI gates, PRR-008 Playwright fix, e2e landing test fix). Commit before next handoff.
-- `brevixai-agents` is on `update-git-actions`; working tree has uncommitted PRR-013 comment. Commit before next handoff.
+- `brevixai-api` is on `dev`; `.env.example` was already dirty before this doc update. This pass updates readiness docs only.
+- `brevixai` is on `dev`; frontend Rex approval integration is implemented and verified. Staging/commit is operator-owned.
+- `brevixai-agents` was not changed in this pass.
 
 Confirmed decisions:
 
 - **Rex runtime**: Laravel → brevixai-agents is production. Node/TypeScript docs superseded. PRR-002 closed.
 - **Production CORS**: Already set in production environment. PRR-009 verification deferred.
 
-Completed this session (Wave 1):
+Completed this update:
+
+- PRR-026 resolved: standalone Rex now executes persisted approval-backed actions through `/api/agent-approvals/{approval}/approve|reject`, preserves reviewed card state, and shows safe failure copy. Frontend gates passed: typecheck, full Jest, and Rex Playwright approval-flow e2e.
+
+Completed earlier sessions:
 
 - PRR-007 resolved: `investigative_synthesis` now passes through `BrevixAgentRunner` and `AgentChatController::responseContract()`; two new contract tests added; 243 API tests pass.
 - PRR-002 resolved by decision: Node/TypeScript Rex architecture doc marked superseded.
@@ -84,7 +88,7 @@ Open user questions:
 | Product value and onboarding | Not started | Confirm the app clearly solves a high-value workflow for the target buyer. |
 | AWS deployment and runtime config | In progress | Verify envs, secrets, CORS, URLs, jobs, queues, health checks, and rollback paths. |
 | Auth, tenancy, and authorization | In progress | Verify cross-company isolation, admin scope, route guards, and internal service auth. |
-| Rex chat and agent flow | In progress | Resolve runtime ownership, OpenAI config, agent fallback behavior, persistence, and tests. |
+| Rex chat and agent flow | In progress — approval execution resolved | Resolve remaining OpenAI config and agent fallback behavior after persisted approval UI is now covered. |
 | Data ingestion and integrations | Not started | Verify QuickBooks, uploads, S3 imports, validation, reconciliation, and error handling. |
 | Fraud/risk/cases workflows | Not started | Verify deterministic scoring, recommendations, evidence, case lifecycle, and auditability. |
 | Observability and operations | Not started | Verify structured logs, trace IDs, dashboards, alerts, SLOs, and runbooks. |
@@ -96,8 +100,7 @@ Open user questions:
 
 1. What AWS services are currently in use for each repo: Amplify, ECS/Fargate, EC2, RDS, S3, CloudFront, Route 53, Secrets Manager, SSM?
 2. What are the production URLs for frontend, API, and agent service health checks?
-3. Does `POST /api/alerts/run` have a planned implementation, or should the "Run Engine" button be removed from the alerts page (PRR-016)?
-4. Is onboarding intended to stay educational-only, or should it link directly to QB connect and upload (PRR-017)?
+3. Is onboarding intended to stay educational-only, or should it link directly to QB connect and upload (PRR-017)?
 
 ## Findings
 
@@ -128,6 +131,7 @@ Open user questions:
 | PRR-023 | High | QB purge wiped all company alerts | Resolved | `QboService::purge()` deleted all `alerts` and `alert_groups` for the company regardless of which realm was purged. Purging one QB connection nuked alerts derived from other realms or file uploads. | `app/Services/QboService.php:595-596`. | Fixed: alerts are now only deleted when no transaction data remains for the company (`qbo_transactions`, `transactions`, `gnucash_transactions` all empty). `alert_recommendations` also cleared in that case. Covered by 5 new `QboPurgeTest` tests. |
 | PRR-024 | Medium | QB credentials fall back to global env | Open | `QboService::getCredentials()` silently falls back to `env('QB_CLIENT_ID')` if per-company credentials are missing or decryption fails. A company without configured credentials gets the global sandbox credentials and OAuth proceeds incorrectly. | `app/Services/QboService.php:57-68`. | Remove fallback; throw clearly if per-company credentials are not found. |
 | PRR-025 | Low | OAuth state nonce is cache-only | Open | OAuth state nonce is stored only in cache (Redis/file) with a 10-min TTL. A cache restart between OAuth connect and Intuit callback breaks in-flight auth flows. Not a security bypass but a reliability gap. | `app/Services/QboService.php:32-47`. | Store nonce in a DB-backed table or use a longer-lived cache key with a dedicated cache store. |
+| PRR-026 | Medium | Rex approval UI | Resolved | Standalone Rex previously rendered persisted `approval_id` recommendations as review-only local actions instead of executing through the persisted approval endpoints. | `brevixai/src/components/dashboard/rex/RexWorkspace.tsx`, `RexActionBar.tsx`, `RexEvidencePanel.tsx`, `brevixai/app/__tests__/rex-action-approvals.test.tsx`, `brevixai/e2e/rex-layout.test.ts`. | Frontend now maps `approval_id` into executable action cards, calls `/api/agent-approvals/{id}/approve|reject`, shows reviewed/safe-failure states, and covers the flow in Jest plus Playwright. |
 
 ## Verification Log
 
@@ -159,6 +163,9 @@ Open user questions:
 | 2026-05-24 | `php artisan test` | `brevixai-api` | Passed: 247 tests, 1263 assertions. PRR-016 fix caused no regressions. |
 | 2026-05-24 | `php artisan test tests/Feature/QboPurgeTest.php` | `brevixai-api` | Passed: 5 tests, 15 assertions. PRR-023 fixed. |
 | 2026-05-24 | `php artisan test` | `brevixai-api` | Passed: 252 tests, 1263 assertions. PRR-022 + PRR-023 implementation caused no regressions. |
+| 2026-06-05 | `npm run typecheck` | `brevixai` | Passed after Rex approval frontend changes. |
+| 2026-06-05 | `npm test -- --runInBand --watchman=false` | `brevixai` | Passed: 14 suites, 156 tests. |
+| 2026-06-05 | `npm run test:e2e -- e2e/rex-layout.test.ts` | `brevixai` | Passed: 3 Playwright tests covering Rex layout, persisted approval success, and safe failure copy. |
 
 ## Source Notes
 
