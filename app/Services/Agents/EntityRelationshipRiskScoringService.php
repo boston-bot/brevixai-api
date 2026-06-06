@@ -69,6 +69,9 @@ class EntityRelationshipRiskScoringService
                 foreach ($uniqueVendors as $v) {
                     $relatedEntities[] = [
                         'type' => 'employee_vendor_relationship',
+                        'relationship_type' => 'employee_vendor_overlap',
+                        'employee_id' => $u->id,
+                        'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($v))),
                         'entities' => [$fullName, $v],
                         'description' => "Employee name or email matched vendor name '{$v}'.",
                     ];
@@ -114,6 +117,9 @@ class EntityRelationshipRiskScoringService
                 $related = $a->evidence['metadata']['related_vendors'] ?? $a->evidence['related_vendors'] ?? ['Multiple Vendors'];
                 $relatedEntities[] = [
                     'type' => 'shared_banking',
+                    'relationship_type' => 'vendor_uses_bank_account',
+                    'bank_account_id' => md5($companyId . '|bank_account|' . $a->id),
+                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[0] ?? ''))),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -147,6 +153,9 @@ class EntityRelationshipRiskScoringService
                 $related = $a->evidence['metadata']['related_entities'] ?? $a->evidence['related_entities'] ?? ['Multiple Entities'];
                 $relatedEntities[] = [
                     'type' => 'shared_address',
+                    'relationship_type' => 'employee_shares_address_with_vendor',
+                    'employee_id' => md5($companyId . '|employee|' . strtolower(trim($related[0] ?? ''))),
+                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[1] ?? ''))),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -182,6 +191,8 @@ class EntityRelationshipRiskScoringService
                 $related = $a->evidence['metadata']['related_entities'] ?? $a->evidence['related_entities'] ?? ['Multiple Entities'];
                 $relatedEntities[] = [
                     'type' => 'shared_contact',
+                    'relationship_type' => 'shared_contact',
+                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[0] ?? ''))),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -219,6 +230,9 @@ class EntityRelationshipRiskScoringService
                 $clusters[] = $cluster;
                 $relatedEntities[] = [
                     'type' => 'duplicate_vendor_identity',
+                    'relationship_type' => 'vendor_related_to_vendor',
+                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($cluster[0] ?? ''))),
+                    'related_vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($cluster[1] ?? ''))),
                     'entities' => $cluster,
                     'description' => 'Vendors identified as part of a single identity cluster due to close spelling similarity.',
                 ];
@@ -263,6 +277,9 @@ class EntityRelationshipRiskScoringService
                 $related = $a->evidence['metadata']['related_vendors'] ?? $a->evidence['related_vendors'] ?? ['Multiple Vendors'];
                 $relatedEntities[] = [
                     'type' => 'vendor_vendor_relationship',
+                    'relationship_type' => 'vendor_vendor_payment',
+                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[0] ?? ''))),
+                    'related_vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[1] ?? ''))),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];

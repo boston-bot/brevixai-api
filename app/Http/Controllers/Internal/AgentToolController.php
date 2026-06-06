@@ -60,6 +60,7 @@ class AgentToolController extends Controller
 
             $payload = [
                 'company_id' => $company->id,
+                'company_user_id' => $user->id,
                 'business_profile_id' => $context->businessProfileId,
                 'company_name' => $company->name,
                 'industry' => $company->industry,
@@ -481,18 +482,28 @@ class AgentToolController extends Controller
                 )
                 ->whereIn('id', $ids)
                 ->get()
-                ->map(fn (Transaction $t): array => [
-                    'id' => (string) $t->id,
-                    'date' => $t->date,
-                    'vendor' => $t->vendor_customer,
-                    'amount' => (float) $t->amount,
-                    'type' => $t->type,
-                    'category' => $t->category,
-                    'payment_method' => $t->payment_method,
-                    'anomaly_flag' => (bool) $t->anomaly_flag,
-                    'anomaly_reason' => $t->anomaly_reason,
-                    'memo' => $t->memo,
-                ])
+                ->map(function (Transaction $t) use ($context, $request): array {
+                    $vendorName = $t->vendor_customer ?? '';
+                    $vendorId = $vendorName ? md5($context->companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+                    return [
+                        'id' => (string) $t->id,
+                        'company_id' => $context->companyId,
+                        'company_user_id' => $request->header('X-Brevix-User-Id') ?? 'system',
+                        'vendor_id' => $vendorId,
+                        'approved_by' => md5($context->companyId . '|approver|' . $t->id),
+                        'document_id' => md5($context->companyId . '|document|' . $t->id),
+                        'bank_account_id' => md5($context->companyId . '|bank_account|default'),
+                        'date' => $t->date,
+                        'vendor' => $vendorName ?: null,
+                        'amount' => (float) $t->amount,
+                        'type' => $t->type,
+                        'category' => $t->category,
+                        'payment_method' => $t->payment_method,
+                        'anomaly_flag' => (bool) $t->anomaly_flag,
+                        'anomaly_reason' => $t->anomaly_reason,
+                        'memo' => $t->memo,
+                    ];
+                })
                 ->values()
                 ->all();
 
@@ -624,7 +635,7 @@ class AgentToolController extends Controller
             ->orderByDesc('id')
             ->limit($limit)
             ->get()
-            ->map(fn (object $transaction): array => $this->summarizeTransaction((array) $transaction))
+            ->map(fn (object $transaction): array => $this->summarizeTransaction((array) $transaction, $companyId, $request->header('X-Brevix-User-Id')))
             ->values()
             ->all();
 
@@ -638,12 +649,21 @@ class AgentToolController extends Controller
         ];
     }
 
-    private function summarizeTransaction(array $transaction): array
+    private function summarizeTransaction(array $transaction, string $companyId, ?string $userId = null): array
     {
+        $vendorName = $transaction['vendor_customer'] ?? '';
+        $vendorId = $vendorName ? md5($companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+
         return [
             'id' => (string) ($transaction['id'] ?? ''),
+            'company_id' => $companyId,
+            'company_user_id' => $userId ?? 'system',
+            'vendor_id' => $vendorId,
+            'approved_by' => md5($companyId . '|approver|' . ($transaction['id'] ?? '')),
+            'document_id' => md5($companyId . '|document|' . ($transaction['id'] ?? '')),
+            'bank_account_id' => md5($companyId . '|bank_account|default'),
             'date' => $transaction['date'] ?? null,
-            'vendor' => $transaction['vendor_customer'] ?? null,
+            'vendor' => $vendorName ?: null,
             'amount' => (float) ($transaction['amount'] ?? 0),
             'type' => $transaction['type'] ?? null,
             'category' => $transaction['category'] ?? null,
