@@ -39,7 +39,7 @@ class VendorRiskScoringService
         $companyTxns = $this->transactionQuery($companyId, $businessProfileId)->get();
 
         if ($vendorTxns->isEmpty()) {
-            return $this->emptyVendorResponse($vendorName, $businessProfileId);
+            return $this->emptyVendorResponse($companyId, $vendorName, $businessProfileId);
         }
 
         $triggeredRules = [];
@@ -289,7 +289,10 @@ class VendorRiskScoringService
 
         $finalScore = min(100, $totalScore);
 
+        $vendorId = $vendorName ? md5($companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+
         return [
+            'vendor_id' => $vendorId,
             'vendor_name' => $vendorName,
             'business_profile_id' => $businessProfileId,
             'vendor_risk_score' => $finalScore,
@@ -340,9 +343,12 @@ class VendorRiskScoringService
     /**
      * Safe empty response when no transactions are found.
      */
-    private function emptyVendorResponse(string $vendorName, ?string $businessProfileId = null): array
+    private function emptyVendorResponse(string $companyId, string $vendorName, ?string $businessProfileId = null): array
     {
+        $vendorId = $vendorName ? md5($companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+
         return [
+            'vendor_id' => $vendorId,
             'vendor_name' => $vendorName,
             'business_profile_id' => $businessProfileId,
             'vendor_risk_score' => 0,
