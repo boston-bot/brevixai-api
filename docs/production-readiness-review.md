@@ -14,8 +14,8 @@ Last updated: 2026-06-05 (Phase 3 frontend approval integration)
 
 Current state:
 
-- `brevixai-api` is on `dev`; `.env.example` was already dirty before this doc update. This pass updates readiness docs only.
-- `brevixai` is on `dev`; frontend Rex approval integration is implemented and verified. Staging/commit is operator-owned.
+- `brevixai-api` is on `process-ready`; `.env.example` was already dirty before this doc update. This pass updates readiness docs only.
+- `brevixai` is on `action-bar`; frontend Rex approval integration is implemented, committed, and verified. The latest frontend commit also includes files outside the original four-file approval-integration scope.
 - `brevixai-agents` was not changed in this pass.
 
 Confirmed decisions:
@@ -61,9 +61,9 @@ Open user questions:
 
 | Repo | Branch | Working tree | Initial notes |
 | --- | --- | --- | --- |
-| `brevixai-api` | `ready-review` | Dirty | Current uncommitted CORS/auth hardening changes are listed in the Claude handoff snapshot. |
-| `brevixai` | `main` | Clean | No README found; Expo/React Native web app. |
-| `brevixai-agents` | `update-git-actions` | Clean | FastAPI/LangGraph service with benchmark gate docs. |
+| `brevixai-api` | `process-ready` | Dirty | Pre-existing `.env.example` change plus this pass's production-readiness table correction. |
+| `brevixai` | `action-bar` | Clean | Latest commit includes Rex approval integration and e2e coverage; it also includes files outside the originally requested approval-integration commit scope. |
+| `brevixai-agents` | Not inspected this pass | Not inspected | FastAPI/LangGraph service with benchmark gate docs; no changes made in this pass. |
 
 ## Initial Architecture Map
 
