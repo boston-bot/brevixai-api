@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\EnsureAdminUser::class,
             'personal.finance.enabled' => \App\Http\Middleware\EnsurePersonalFinanceEnabled::class,
             'personal.finance.local' => \App\Http\Middleware\EnsurePersonalFinanceLocalEnabled::class,
+            'fraud.testing.token' => \App\Http\Middleware\AuthenticateFraudTestingToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
