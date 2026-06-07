@@ -66,4 +66,8 @@ return [
         ],
     ],
 
+    'fraud_testing' => [
+        'api_key' => env('BREVIX_INTERNAL_AGENT_TOKEN'),
+    ],
+
 ];
