@@ -78,9 +78,13 @@ class BusinessProfileContextService
             throw new BusinessProfileAccessException('Unauthenticated.', 401);
         }
 
-        $workspaceId = $companyId ?: $this->workspaceIdForUser($user);
+        $workspaceId = $companyId ?: $this->requestedWorkspaceId($request) ?: $this->workspaceIdForUser($user);
         if (! $workspaceId) {
             throw new BusinessProfileAccessException('No workspace associated with account.', 403);
+        }
+
+        if (! $this->workspaceRole($user, $workspaceId)) {
+            throw new BusinessProfileAccessException('User is not a member of the requested workspace.', 403);
         }
 
         return $this->resolveForUser($user, $workspaceId, $this->requestedBusinessProfileId($request));
@@ -239,6 +243,16 @@ class BusinessProfileContextService
                 ->first();
 
             return $membership ? (string) $membership->company_id : null;
+        }
+
+        return null;
+    }
+
+    public function requestedWorkspaceId(Request $request): ?string
+    {
+        $header = $request->header('X-Brevix-Workspace-Id');
+        if (is_string($header) && $header !== '') {
+            return $header;
         }
 
         return null;

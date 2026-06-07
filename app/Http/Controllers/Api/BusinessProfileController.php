@@ -20,7 +20,9 @@ class BusinessProfileController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $companyId = $request->user()->company_id;
+        $companyId = $this->businessProfileContext->requestedWorkspaceId($request)
+            ?: $request->user()->company_id;
+
         if (! $companyId) {
             return response()->json(['error' => 'No workspace associated with account'], 403);
         }
