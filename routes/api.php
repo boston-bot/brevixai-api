@@ -353,8 +353,9 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     });
 });
 
-// Fraud Testing — temporarily open (remove middleware when done with manual ChatGPT workflow)
+// Fraud Testing — internal API protected by fraud testing token
 Route::prefix('internal/fraud-testing')
+    ->middleware('fraud.testing.token')
     ->group(function () {
         // Workbook imports
         Route::post('/imports', [FraudScenarioImportController::class, 'store']);
@@ -368,8 +369,9 @@ Route::prefix('internal/fraud-testing')
         Route::post('/scenarios/{id}/reject', [FraudScenarioController::class, 'reject']);
     });
 
-// Fraud Testing — agent API (temporarily open)
+// Fraud Testing — agent API protected by fraud testing token
 Route::prefix('internal/fraud-scenarios')
+    ->middleware('fraud.testing.token')
     ->group(function () {
         Route::get('/pending', [FraudScenarioAgentController::class, 'pending']);
         Route::post('/{id}/claim', [FraudScenarioAgentController::class, 'claim']);
