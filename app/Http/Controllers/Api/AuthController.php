@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\PasswordReset;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Models\WorkspaceMembership;
 use App\Services\BusinessProfileContextService;
 use App\Services\PlanPolicyService;
 use Illuminate\Http\JsonResponse;
@@ -221,6 +222,25 @@ class AuthController extends Controller
         $contextService = app(BusinessProfileContextService::class);
         $profiles = $contextService->profilesForUser($user, $user->company_id);
 
+        $allWorkspaceIds = WorkspaceMembership::where('user_id', $user->id)
+            ->pluck('company_id')
+            ->push($user->company_id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $workspaces = Company::whereIn('id', $allWorkspaceIds)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Company $c): array => [
+                'id' => (string) $c->id,
+                'name' => (string) $c->name,
+                'role' => $contextService->workspaceRole($user, (string) $c->id) ?: $user->role,
+                'isPrimary' => (string) $user->company_id === (string) $c->id,
+            ])
+            ->values()
+            ->all();
+
         return [
             'id' => $user->id,
             'email' => $user->email,
@@ -234,6 +254,7 @@ class AuthController extends Controller
                 'name' => $company->name,
                 'role' => $contextService->workspaceRole($user, (string) $company->id) ?: $user->role,
             ] : null,
+            'workspaces' => $workspaces,
             'businessProfiles' => $profiles,
             'activeBusinessProfileId' => count($profiles) === 1 ? $profiles[0]['id'] : null,
         ];
