@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\ActionPlanController;
+use App\Http\Controllers\FraudTesting\FraudScenarioAgentController;
+use App\Http\Controllers\FraudTesting\FraudScenarioController;
+use App\Http\Controllers\FraudTesting\FraudScenarioImportController;
 use App\Http\Controllers\Api\Admin\SiteArticleController;
 use App\Http\Controllers\Api\Admin\SitePageController;
 use App\Http\Controllers\Api\Admin\SiteSettingsController;
@@ -349,3 +352,31 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::post('/interpret', [TaxNoticeController::class, 'interpret']);
     });
 });
+
+// Fraud Testing — temporarily open (remove middleware when done with manual ChatGPT workflow)
+Route::prefix('internal/fraud-testing')
+    ->group(function () {
+        // Workbook imports
+        Route::post('/imports', [FraudScenarioImportController::class, 'store']);
+        Route::get('/imports', [FraudScenarioImportController::class, 'index']);
+        Route::get('/imports/{id}', [FraudScenarioImportController::class, 'show']);
+
+        // Scenario admin / review
+        Route::get('/scenarios', [FraudScenarioController::class, 'index']);
+        Route::get('/scenarios/{id}', [FraudScenarioController::class, 'show']);
+        Route::post('/scenarios/{id}/approve', [FraudScenarioController::class, 'approve']);
+        Route::post('/scenarios/{id}/reject', [FraudScenarioController::class, 'reject']);
+    });
+
+// Fraud Testing — agent API (temporarily open)
+Route::prefix('internal/fraud-scenarios')
+    ->group(function () {
+        Route::get('/pending', [FraudScenarioAgentController::class, 'pending']);
+        Route::post('/{id}/claim', [FraudScenarioAgentController::class, 'claim']);
+        Route::post('/{id}/mock-data-claim', [FraudScenarioAgentController::class, 'claimMockData']);
+        Route::get('/{id}/extraction-prompt', [FraudScenarioAgentController::class, 'extractionPrompt']);
+        Route::post('/{id}/extraction', [FraudScenarioAgentController::class, 'saveExtraction']);
+        Route::get('/{id}/mock-data-prompt', [FraudScenarioAgentController::class, 'mockDataPrompt']);
+        Route::post('/{id}/mock-data', [FraudScenarioAgentController::class, 'saveMockData']);
+        Route::post('/{id}/fail', [FraudScenarioAgentController::class, 'fail']);
+    });
