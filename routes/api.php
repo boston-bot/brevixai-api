@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActionPlanController;
+use App\Http\Controllers\Api\WorkspaceController;
 use App\Http\Controllers\FraudTesting\FraudScenarioAgentController;
 use App\Http\Controllers\FraudTesting\FraudScenarioController;
 use App\Http\Controllers\FraudTesting\FraudScenarioImportController;
@@ -102,6 +103,9 @@ Route::prefix('internal/agent-tools')
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
+    Route::get('/workspaces', [WorkspaceController::class, 'index']);
+    Route::post('/workspaces', [WorkspaceController::class, 'store']);
+
     Route::prefix('local/personal-finance')
         ->middleware('personal.finance.local')
         ->group($personalFinanceRoutes);
