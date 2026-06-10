@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -222,9 +223,15 @@ class AuthController extends Controller
         $contextService = app(BusinessProfileContextService::class);
         $profiles = $contextService->profilesForUser($user, $user->company_id);
 
-        $allWorkspaceIds = WorkspaceMembership::where('user_id', $user->id)
-            ->pluck('company_id')
-            ->push($user->company_id)
+        $allWorkspaceIds = collect([$user->company_id]);
+
+        if (Schema::hasTable('workspace_memberships')) {
+            $allWorkspaceIds = $allWorkspaceIds->merge(
+                WorkspaceMembership::where('user_id', $user->id)->pluck('company_id'),
+            );
+        }
+
+        $allWorkspaceIds = $allWorkspaceIds
             ->filter()
             ->unique()
             ->values();
