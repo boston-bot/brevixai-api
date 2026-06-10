@@ -371,6 +371,7 @@ Route::prefix('internal/fraud-testing')
         Route::get('/scenarios/{id}', [FraudScenarioController::class, 'show']);
         Route::post('/scenarios/{id}/approve', [FraudScenarioController::class, 'approve']);
         Route::post('/scenarios/{id}/reject', [FraudScenarioController::class, 'reject']);
+        Route::post('/scenarios/{id}/provision-workspace', [FraudScenarioController::class, 'provisionWorkspace']);
     });
 
 // Fraud Testing — agent API protected by fraud testing token
