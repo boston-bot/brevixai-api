@@ -137,6 +137,12 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
             Route::post('/articles/{id}/remove-from-public', [SiteArticleController::class, 'removeFromPublic']);
         });
 
+    Route::prefix('admin/fraud-testing')
+        ->middleware('admin')
+        ->group(function (): void {
+            Route::post('/scenarios/{id}/provision-workspace', [FraudScenarioController::class, 'provisionAdminWorkspace']);
+        });
+
     // Protected Auth Routes
     Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
