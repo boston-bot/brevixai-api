@@ -4,6 +4,7 @@ namespace App\Http\Controllers\FraudTesting;
 
 use App\Http\Controllers\Controller;
 use App\Models\FraudTesting\FraudScenarioSubmission;
+use App\Services\FraudTesting\FraudScenarioProvisionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -90,5 +91,43 @@ class FraudScenarioController extends Controller
         $submission->update(['review_status' => FraudScenarioSubmission::REVIEW_STATUS_REJECTED]);
 
         return response()->json(['message' => 'Scenario rejected', 'review_status' => $submission->review_status]);
+    }
+
+    /**
+     * POST /api/internal/fraud-testing/scenarios/{id}/provision-workspace
+     *
+     * Creates a fresh test workspace seeded with the scenario's mock data.
+     * Returns login credentials so you can immediately sign in and browse
+     * the data as a normal user would.
+     */
+    public function provisionWorkspace(Request $request, string $id, FraudScenarioProvisionService $provisionService): JsonResponse
+    {
+        $request->validate([
+            'email' => 'nullable|email',
+            'password' => 'nullable|string|min:8',
+        ]);
+
+        $submission = FraudScenarioSubmission::find($id);
+        if (! $submission) {
+            return response()->json(['error' => 'Scenario not found'], 404);
+        }
+
+        if ($submission->mock_data_status !== FraudScenarioSubmission::MOCK_DATA_STATUS_COMPLETED) {
+            return response()->json([
+                'error' => 'Mock data is not ready. Current status: ' . $submission->mock_data_status,
+            ], 422);
+        }
+
+        try {
+            $credentials = $provisionService->provision(
+                $submission,
+                email: $request->input('email'),
+                password: $request->input('password'),
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json($credentials, 201);
     }
 }
