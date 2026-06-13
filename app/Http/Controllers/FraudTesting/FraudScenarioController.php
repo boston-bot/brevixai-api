@@ -130,4 +130,53 @@ class FraudScenarioController extends Controller
 
         return response()->json($credentials, 201);
     }
+
+    /**
+     * POST /api/admin/fraud-testing/scenarios/{id}/provision-workspace
+     *
+     * Creates a fresh test workspace from mock data and links the
+     * authenticated admin user to it through workspace membership.
+     */
+    public function provisionAdminWorkspace(Request $request, string $id, FraudScenarioProvisionService $provisionService): JsonResponse
+    {
+        $validated = $request->validate([
+            'role' => 'nullable|in:owner,admin',
+        ]);
+
+        $submission = FraudScenarioSubmission::find($id);
+        if (! $submission) {
+            return response()->json(['error' => 'Scenario not found'], 404);
+        }
+
+        if ($submission->mock_data_status !== FraudScenarioSubmission::MOCK_DATA_STATUS_COMPLETED) {
+            return response()->json([
+                'error' => 'Mock data is not ready. Current status: ' . $submission->mock_data_status,
+            ], 422);
+        }
+
+        try {
+            $provisioned = $provisionService->provision(
+                $submission,
+                workspaceMember: $request->user(),
+                workspaceMemberRole: $validated['role'] ?? 'admin',
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'workspace' => [
+                'id' => $provisioned['workspace_id'],
+                'name' => $provisioned['workspace_name'],
+                'role' => $validated['role'] ?? 'admin',
+                'businessProfileId' => $provisioned['business_profile_id'],
+                'businessProfileName' => $provisioned['business_profile_name'],
+            ],
+            'scenario' => [
+                'id' => $provisioned['scenario_id'],
+                'title' => $provisioned['scenario_title'],
+            ],
+            'transactionCount' => $provisioned['transaction_count'],
+        ], 201);
+    }
 }

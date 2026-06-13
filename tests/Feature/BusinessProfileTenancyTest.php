@@ -104,6 +104,12 @@ class BusinessProfileTenancyTest extends TestCase
         $profiles = collect($response->json('businessProfiles'))->keyBy('id');
         $this->assertSame('viewer', $profiles[$defaultProfile->id]['role']);
         $this->assertSame('admin', $profiles[$restrictedProfile->id]['role']);
+
+        $workspace = collect($response->json('workspaces'))->firstWhere('id', $company->id);
+        $this->assertNotNull($workspace);
+        $workspaceProfiles = collect($workspace['businessProfiles'])->keyBy('id');
+        $this->assertSame('viewer', $workspaceProfiles[$defaultProfile->id]['role']);
+        $this->assertSame('admin', $workspaceProfiles[$restrictedProfile->id]['role']);
     }
 
     public function test_uploads_enforce_free_file_limit_and_are_profile_scoped(): void
@@ -291,6 +297,53 @@ class BusinessProfileTenancyTest extends TestCase
             ->assertOk()
             ->assertJsonPath('monthlyBurn', 150)
             ->assertJsonPath('trailingMonths.0.spend', 150);
+    }
+
+    public function test_dashboard_uses_selected_workspace_header_for_workspace_member(): void
+    {
+        [$primaryCompany, $admin] = $this->createWorkspace('growth');
+        $primaryProfile = $this->createProfile($primaryCompany, 'Primary', isDefault: true);
+        [$mockCompany] = $this->createWorkspace('growth');
+        $mockProfile = $this->createProfile($mockCompany, 'Mock Company', isDefault: true);
+
+        WorkspaceMembership::create([
+            'company_id' => $mockCompany->id,
+            'user_id' => $admin->id,
+            'role' => 'admin',
+            'scope' => 'workspace',
+            'granted_by' => $admin->id,
+        ]);
+
+        $this->insertTransaction($primaryCompany->id, $primaryProfile->id, 'Primary Vendor', 100.00);
+        $this->insertTransaction($mockCompany->id, $mockProfile->id, 'Mock Vendor', 444.00);
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/dashboard/summary', [
+            'X-Brevix-Workspace-Id' => $mockCompany->id,
+            'X-Brevix-Business-Profile-Id' => $mockProfile->id,
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.totalTransactions', 1)
+            ->assertJsonPath('stats.amountReviewed', 444)
+            ->assertJsonPath('stats.vendorsMonitored', 1);
+    }
+
+    public function test_selected_workspace_header_is_rejected_for_non_member(): void
+    {
+        [$mockCompany] = $this->createWorkspace('growth');
+        $mockProfile = $this->createProfile($mockCompany, 'Mock Company', isDefault: true);
+        [$outsiderCompany, $outsider] = $this->createWorkspace('growth');
+        $this->createProfile($outsiderCompany, 'Outsider', isDefault: true);
+
+        Sanctum::actingAs($outsider);
+
+        $this->getJson('/api/dashboard/summary', [
+            'X-Brevix-Workspace-Id' => $mockCompany->id,
+            'X-Brevix-Business-Profile-Id' => $mockProfile->id,
+        ])
+            ->assertForbidden()
+            ->assertJsonPath('error', 'User is not a member of the requested workspace.');
     }
 
     public function test_alerts_are_profile_scoped(): void
