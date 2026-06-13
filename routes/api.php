@@ -229,7 +229,14 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     });
 
     Route::get('/action-plan', [ActionPlanController::class, 'show']);
-    Route::get('/findings', [FindingController::class, 'index']);
+
+    // Findings
+    Route::prefix('findings')->group(function () {
+        Route::get('/', [FindingController::class, 'index']);
+        Route::get('/{id}', [FindingController::class, 'show']);
+        Route::post('/{id}/review', [FindingController::class, 'review']);
+        Route::post('/{id}/create-investigation', [FindingController::class, 'createInvestigation']);
+    });
 
     Route::prefix('reviews')->group(function () {
         Route::post('/first-snapshot', [ReviewSnapshotController::class, 'firstSnapshot']);
@@ -291,12 +298,15 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     // Investigations
     Route::prefix('investigations')->group(function () {
         Route::get('/', [InvestigationController::class, 'index']);
+        Route::post('/', [InvestigationController::class, 'store']);
         Route::get('/{id}', [InvestigationController::class, 'show']);
+        Route::patch('/{id}', [InvestigationController::class, 'update']);
         Route::get('/{id}/contract', [InvestigationPlatformContractController::class, 'investigation']);
         Route::get('/{id}/findings', [InvestigationPlatformContractController::class, 'findings']);
         Route::get('/{id}/suggested-records', [InvestigationPlatformContractController::class, 'suggestedRecords']);
         Route::get('/{id}/activity', [InvestigationPlatformContractController::class, 'activity']);
-        Route::get('/{id}/packages', [InvestigationPlatformContractController::class, 'packages']);
+        Route::get('/{id}/packages', [InvestigationController::class, 'packages']);
+        Route::post('/{id}/packages', [InvestigationController::class, 'generatePackage']);
         Route::post('/{id}/assign', [InvestigationController::class, 'assign']);
         Route::post('/{id}/status', [InvestigationController::class, 'status']);
         Route::post('/{id}/notes', [InvestigationController::class, 'notes']);
