@@ -2,10 +2,14 @@
 
 namespace Tests\Feature\FraudTesting;
 
+use App\Models\Company;
+use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class FraudScenarioProvisionTest extends TestCase
@@ -26,7 +30,7 @@ class FraudScenarioProvisionTest extends TestCase
             'fraud_expected_findings', 'fraud_expected_indicators',
             'fraud_scenario_extractions', 'fraud_scenario_submissions',
             'transactions', 'uploads', 'business_profile_memberships',
-            'business_profiles', 'workspace_memberships', 'subscriptions', 'users', 'companies',
+            'business_profiles', 'workspace_memberships', 'subscriptions', 'personal_access_tokens', 'users', 'companies',
         ] as $table) {
             Schema::dropIfExists($table);
         }
@@ -161,7 +165,80 @@ class FraudScenarioProvisionTest extends TestCase
         $this->assertDatabaseCount('companies', 2);
     }
 
+    public function test_admin_provision_links_mock_workspace_to_current_admin_user(): void
+    {
+        [$scenarioId] = $this->insertScenarioWithMockData();
+        $admin = $this->createAdminUser();
+
+        Sanctum::actingAs($admin);
+
+        $response = $this->postJson("/api/admin/fraud-testing/scenarios/{$scenarioId}/provision-workspace")
+            ->assertCreated()
+            ->assertJsonPath('workspace.role', 'admin')
+            ->assertJsonPath('workspace.name', 'Acme Corp')
+            ->assertJsonPath('scenario.id', $scenarioId)
+            ->assertJsonPath('transactionCount', 2);
+
+        $data = $response->json();
+        $workspaceId = $data['workspace']['id'];
+        $businessProfileId = $data['workspace']['businessProfileId'];
+
+        $this->assertArrayNotHasKey('email', $data);
+        $this->assertArrayNotHasKey('password', $data);
+
+        $this->assertDatabaseHas('workspace_memberships', [
+            'company_id' => $workspaceId,
+            'user_id' => $admin->id,
+            'role' => 'admin',
+        ]);
+        $this->assertDatabaseHas('business_profiles', [
+            'id' => $businessProfileId,
+            'company_id' => $workspaceId,
+            'is_default' => 1,
+        ]);
+        $this->assertDatabaseHas('transactions', [
+            'company_id' => $workspaceId,
+            'business_profile_id' => $businessProfileId,
+            'txn_id' => 'TXN-001',
+        ]);
+    }
+
+    public function test_admin_provision_requires_admin_role(): void
+    {
+        [$scenarioId] = $this->insertScenarioWithMockData();
+        $member = $this->createAdminUser('member');
+
+        Sanctum::actingAs($member);
+
+        $this->postJson("/api/admin/fraud-testing/scenarios/{$scenarioId}/provision-workspace")
+            ->assertForbidden();
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private function createAdminUser(string $role = 'admin'): User
+    {
+        $companyId = (string) Str::uuid();
+        tap(new Company)->forceFill([
+            'id' => $companyId,
+            'name' => 'Brevix Admin',
+            'has_completed_onboarding' => true,
+        ])->save();
+
+        $userId = (string) Str::uuid();
+        tap(new User)->forceFill([
+            'id' => $userId,
+            'company_id' => $companyId,
+            'email' => Str::uuid().'@brevix.test',
+            'password_hash' => Hash::make('password123'),
+            'first_name' => 'Brevix',
+            'last_name' => 'Admin',
+            'role' => $role,
+            'is_verified' => true,
+        ])->save();
+
+        return User::findOrFail($userId);
+    }
 
     private function insertScenario(array $overrides = []): string
     {

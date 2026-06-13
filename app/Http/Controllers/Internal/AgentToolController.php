@@ -711,6 +711,88 @@ class AgentToolController extends Controller
         ];
     }
 
+    public function storeFindings(Request $request, string $companyId): JsonResponse
+    {
+        if (! Str::isUuid($companyId)) {
+            return response()->json(['error' => 'Invalid company id'], 422);
+        }
+
+        $user = $this->authorizedUser($request, $companyId);
+        if (! $user) {
+            return response()->json(['error' => 'User is not authorized for this company'], 403);
+        }
+
+        $data = $request->validate([
+            'agent_run_id'          => ['nullable', 'string', 'max:255'],
+            'findings'              => ['required', 'array', 'max:50'],
+            'findings.*.title'      => ['required', 'string', 'max:500'],
+            'findings.*.severity'   => ['required', 'string', 'in:info,low,medium,high,critical'],
+            'findings.*.summary'    => ['nullable', 'string', 'max:5000'],
+            'findings.*.confidence' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'findings.*.evidence'   => ['nullable', 'array'],
+        ]);
+
+        if (! Company::where('id', $companyId)->exists()) {
+            return response()->json(['error' => 'Company not found'], 404);
+        }
+
+        try {
+            $context = $this->profileContext($request, $user, $companyId);
+            if ($context instanceof JsonResponse) {
+                return $context;
+            }
+
+            $agentRunId = $data['agent_run_id'] ?? null;
+            $runUuid = ($agentRunId && Str::isUuid($agentRunId)) ? $agentRunId : null;
+            $upserted = [];
+
+            foreach ($data['findings'] as $finding) {
+                // Dedup key: same finding title from rex_agent for the same company.
+                // We update evidence/confidence on repeat but never reopen a dismissed alert.
+                $alert = \App\Models\Alert::firstOrNew([
+                    'company_id'    => $context->companyId,
+                    'title'         => $finding['title'],
+                    'source_system' => 'rex_agent',
+                ]);
+
+                $alert->fill([
+                    'rule_key'                 => 'agent_finding',
+                    'severity'                 => $finding['severity'],
+                    'detail'                   => $finding['summary'] ?? null,
+                    'evidence'                 => $finding['evidence'] ?? null,
+                    'confidence_score'         => isset($finding['confidence']) ? round((float) $finding['confidence'], 4) : null,
+                    'source_recommendation_id' => $runUuid,
+                    'priority_score'           => $this->severityToPriority($finding['severity']),
+                ]);
+
+                if (! $alert->exists) {
+                    $alert->status = 'open';
+                    if ($context->businessProfileId) {
+                        $alert->business_profile_id = $context->businessProfileId;
+                    }
+                }
+
+                $alert->save();
+                $upserted[] = (string) $alert->id;
+            }
+
+            return response()->json(['stored' => count($upserted), 'alert_ids' => $upserted]);
+        } catch (Throwable $e) {
+            return $this->safeToolFailure($request, $companyId, $user->id, 'store_findings', $e);
+        }
+    }
+
+    private function severityToPriority(string $severity): int
+    {
+        return match ($severity) {
+            'critical' => 90,
+            'high'     => 75,
+            'medium'   => 50,
+            'low'      => 30,
+            default    => 10,
+        };
+    }
+
     private function authorizedUser(Request $request, string $companyId): ?User
     {
         $userId = $request->header('X-Brevix-User-Id');

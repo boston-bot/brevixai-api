@@ -26,7 +26,7 @@ class ActionPlanService
         $nextBestAction = $this->nextBestAction($session, $readiness, $missingEvidence);
 
         return [
-            'contractVersion' => '2026-05-31',
+            'contractVersion' => '1.0.0',
             'objective' => $requirementsPayload['primaryIntent'] ?? EvidenceRequirementService::INTENT_UNSURE,
             'objectiveDetail' => $this->evidenceRequirements->intentLabel($session->primary_intent),
             'reviewPeriod' => [
@@ -52,29 +52,50 @@ class ActionPlanService
     }
 
     /**
+     * Returns per-source freshness items matching the ActionPlanSourceFreshness contract.
+     *
      * @param array{summary?: array<string, mixed>, sources?: list<array<string, mixed>>} $dataSources
-     * @return array<string, mixed>
+     * @return list<array<string, mixed>>
      */
     private function sourceFreshness(array $dataSources): array
     {
-        $lastSync = null;
-        $activeConnections = 0;
+        $items = [];
         foreach ($dataSources['sources'] ?? [] as $source) {
-            if (!empty($source['lastSyncedAt'])) {
-                if ($lastSync === null || $source['lastSyncedAt'] > $lastSync) {
-                    $lastSync = $source['lastSyncedAt'];
+            $lastSyncedAt = $source['lastSyncedAt'] ?? $source['last_synced_at'] ?? null;
+            $state = $this->normalizeSourceState((string) ($source['status'] ?? $source['state'] ?? 'not_connected'));
+            $freshnessLabel = null;
+            if ($lastSyncedAt) {
+                try {
+                    $dt = new \DateTimeImmutable($lastSyncedAt);
+                    $freshnessLabel = 'Synced ' . $dt->format('M j, Y');
+                } catch (\Throwable) {
+                    $freshnessLabel = $lastSyncedAt;
                 }
             }
-            if (($source['status'] ?? '') === 'active') {
-                $activeConnections++;
-            }
+            $items[] = [
+                'key'           => (string) ($source['key'] ?? $source['id'] ?? 'source'),
+                'label'         => (string) ($source['label'] ?? $source['name'] ?? 'Data Source'),
+                'lastSyncedAt'  => $lastSyncedAt,
+                'freshnessLabel' => $freshnessLabel,
+                'state'         => $state,
+            ];
         }
-        
-        return [
-            'lastSync' => $lastSync,
-            'activeConnections' => $activeConnections,
-            'status' => $lastSync ? 'fresh' : 'stale',
-        ];
+        return $items;
+    }
+
+    private function normalizeSourceState(string $raw): string
+    {
+        $s = strtolower(trim($raw));
+        if (in_array($s, ['active', 'connected', 'synced', 'available', 'validated', 'imported'], true)) {
+            return 'available';
+        }
+        if (in_array($s, ['processing', 'pending', 'syncing', 'uploading', 'awaiting_mapping'], true)) {
+            return 'processing';
+        }
+        if (in_array($s, ['error', 'failed', 'invalid', 'disconnected_error'], true)) {
+            return 'error';
+        }
+        return 'not_connected';
     }
 
     /**
@@ -83,12 +104,16 @@ class ActionPlanService
      */
     private function workflowCards(OnboardingSession $session, array $readiness): array
     {
+        $isReady = ($readiness['status'] ?? null) === 'ready_for_snapshot';
         $cards = [];
         $cards[] = [
-            'id' => 'first_snapshot',
-            'title' => 'First Snapshot',
-            'status' => ($readiness['status'] ?? null) === 'ready_for_snapshot' ? 'ready' : 'locked',
-            'endpoint' => '/api/reviews/first-snapshot',
+            'title'    => 'First Snapshot',
+            'detail'   => $isReady
+                ? 'You have the minimum required evidence. Run the first review snapshot to generate findings.'
+                : 'Complete the evidence checklist to unlock the first review snapshot.',
+            'href'     => '/(dashboard)/onboarding',
+            'ctaLabel' => $isReady ? 'Run snapshot' : 'Add evidence',
+            'locked'   => ! $isReady,
         ];
         return $cards;
     }
@@ -100,14 +125,14 @@ class ActionPlanService
     private function valueLoop(OnboardingSession $session, array $dataSources): array
     {
         $hasSources = count($dataSources['sources'] ?? []) > 0;
-        
+
         return [
-            'newSinceLastVisit' => true,
+            'newSinceLastVisit' => [],
             'sourcesChanged' => $hasSources,
             'findingsChanged' => false,
-            'readinessChanged' => true,
+            'readinessChanged' => false,
             'casesChanged' => false,
-            'monitoringCoverage' => 'partial',
+            'monitoringCoverage' => null,
             'recommendedReviewCadence' => 'monthly',
         ];
     }
@@ -209,12 +234,12 @@ class ActionPlanService
     }
 
     /**
-     * @return array{count: int, items: list<array<string, mixed>>}
+     * @return list<array<string, mixed>>
      */
     private function openFindings(string $companyId, ?string $businessProfileId): array
     {
         if (! Schema::hasTable('alerts')) {
-            return ['count' => 0, 'items' => []];
+            return [];
         }
 
         $query = DB::table('alerts')
@@ -224,20 +249,18 @@ class ActionPlanService
             $query->where('business_profile_id', $businessProfileId);
         }
 
-        $count = (int) (clone $query)->count();
-        $items = $query
+        return $query
             ->orderByDesc(Schema::hasColumn('alerts', 'created_at') ? 'created_at' : 'id')
             ->limit(5)
             ->get()
             ->map(fn (object $alert): array => [
-                'id' => (string) ($alert->id ?? ''),
-                'title' => (string) ($alert->title ?? 'Open finding'),
+                'id'       => (string) ($alert->id ?? ''),
+                'title'    => (string) ($alert->title ?? 'Open finding'),
                 'severity' => (string) ($alert->severity ?? 'info'),
+                'detail'   => (string) ($alert->detail ?? $alert->description ?? 'Review this finding when the supporting evidence is available.'),
             ])
             ->values()
             ->all();
-
-        return ['count' => $count, 'items' => $items];
     }
 
     /**

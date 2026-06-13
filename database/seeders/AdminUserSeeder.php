@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Company;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\BusinessProfileContextService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -29,6 +30,10 @@ class AdminUserSeeder extends Seeder
                 'has_completed_onboarding' => true,
             ],
         );
+        if (! $company->has_completed_onboarding) {
+            $company->has_completed_onboarding = true;
+            $company->save();
+        }
 
         Subscription::firstOrCreate(
             ['company_id' => $company->id],
@@ -49,5 +54,7 @@ class AdminUserSeeder extends Seeder
             'is_verified' => true,
         ]);
         $user->save();
+
+        app(BusinessProfileContextService::class)->createDefaultProfileForWorkspace($company->refresh(), $user);
     }
 }

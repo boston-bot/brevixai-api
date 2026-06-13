@@ -239,12 +239,17 @@ class AuthController extends Controller
         $workspaces = Company::whereIn('id', $allWorkspaceIds)
             ->orderBy('name')
             ->get()
-            ->map(fn (Company $c): array => [
-                'id' => (string) $c->id,
-                'name' => (string) $c->name,
-                'role' => $contextService->workspaceRole($user, (string) $c->id) ?: $user->role,
-                'isPrimary' => (string) $user->company_id === (string) $c->id,
-            ])
+            ->map(function (Company $c) use ($contextService, $user): array {
+                $workspaceId = (string) $c->id;
+
+                return [
+                    'id' => $workspaceId,
+                    'name' => (string) $c->name,
+                    'role' => $contextService->workspaceRole($user, $workspaceId) ?: $user->role,
+                    'isPrimary' => (string) $user->company_id === $workspaceId,
+                    'businessProfiles' => $contextService->profilesForUser($user, $workspaceId),
+                ];
+            })
             ->values()
             ->all();
 

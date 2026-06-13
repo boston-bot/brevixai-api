@@ -22,9 +22,11 @@ use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\ControlsController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\EntityGraphController;
+use App\Http\Controllers\Api\FindingController;
 use App\Http\Controllers\Api\GnuCashController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\InvestigationController;
+use App\Http\Controllers\Api\InvestigationPlatformContractController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PersonalFinanceController;
@@ -77,6 +79,8 @@ Route::get('integrations/qbo/callback', [IntegrationController::class, 'qboCallb
 // Stripe Webhooks (verified via signature — must be outside auth:sanctum)
 Route::post('webhooks/stripe', [StripeWebhookController::class, 'handle']);
 
+Route::get('/investigation-platform/contract', [InvestigationPlatformContractController::class, 'contract']);
+
 Route::prefix('internal/agent-tools')
     ->middleware('agent.tool')
     ->group(function () {
@@ -100,6 +104,7 @@ Route::prefix('internal/agent-tools')
         Route::get('/irs/records-checklist', [IrmKnowledgeController::class, 'recordsChecklist']);
         Route::get('/irs/collection-risk', [IrmKnowledgeController::class, 'collectionRisk']);
         Route::post('/irs/notice/extract', [IrmKnowledgeController::class, 'extractNotice']);
+        Route::post('/company/{companyId}/findings', [AgentToolController::class, 'storeFindings']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
@@ -135,6 +140,12 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
             Route::get('/articles/{id}/preview', [SiteArticleController::class, 'preview']);
             Route::post('/articles/{id}/publish', [SiteArticleController::class, 'publish']);
             Route::post('/articles/{id}/remove-from-public', [SiteArticleController::class, 'removeFromPublic']);
+        });
+
+    Route::prefix('admin/fraud-testing')
+        ->middleware('admin')
+        ->group(function (): void {
+            Route::post('/scenarios/{id}/provision-workspace', [FraudScenarioController::class, 'provisionAdminWorkspace']);
         });
 
     // Protected Auth Routes
@@ -218,6 +229,7 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     });
 
     Route::get('/action-plan', [ActionPlanController::class, 'show']);
+    Route::get('/findings', [FindingController::class, 'index']);
 
     Route::prefix('reviews')->group(function () {
         Route::post('/first-snapshot', [ReviewSnapshotController::class, 'firstSnapshot']);
@@ -280,6 +292,11 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     Route::prefix('investigations')->group(function () {
         Route::get('/', [InvestigationController::class, 'index']);
         Route::get('/{id}', [InvestigationController::class, 'show']);
+        Route::get('/{id}/contract', [InvestigationPlatformContractController::class, 'investigation']);
+        Route::get('/{id}/findings', [InvestigationPlatformContractController::class, 'findings']);
+        Route::get('/{id}/suggested-records', [InvestigationPlatformContractController::class, 'suggestedRecords']);
+        Route::get('/{id}/activity', [InvestigationPlatformContractController::class, 'activity']);
+        Route::get('/{id}/packages', [InvestigationPlatformContractController::class, 'packages']);
         Route::post('/{id}/assign', [InvestigationController::class, 'assign']);
         Route::post('/{id}/status', [InvestigationController::class, 'status']);
         Route::post('/{id}/notes', [InvestigationController::class, 'notes']);
