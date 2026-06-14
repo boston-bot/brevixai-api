@@ -36,6 +36,7 @@ class InvestigationPlatformContractTest extends TestCase
                 'Finding',
                 'EvidenceItem',
                 'SuggestedRecord',
+                'ReviewerNote',
                 'ReviewEvent',
                 'CasePackage',
             ])
@@ -50,6 +51,7 @@ class InvestigationPlatformContractTest extends TestCase
                     'findingSourceModules',
                     'evidenceTypes',
                     'suggestedRecordStatuses',
+                    'reviewerNoteVisibilities',
                     'packageFormats',
                 ],
                 'responseShapes' => [
@@ -57,6 +59,7 @@ class InvestigationPlatformContractTest extends TestCase
                     'finding',
                     'evidenceItem',
                     'suggestedRecord',
+                    'reviewerNote',
                     'reviewEvent',
                     'casePackage',
                 ],
@@ -198,6 +201,14 @@ class InvestigationPlatformContractTest extends TestCase
         $this->getJson("/api/investigations/{$case->id}/activity")
             ->assertOk()
             ->assertJsonPath('reviewEvents', []);
+
+        $this->getJson("/api/investigations/{$case->id}/reviewer-notes")
+            ->assertOk()
+            ->assertJsonPath('reviewerNotes', []);
+
+        $this->getJson("/api/investigations/{$case->id}/notes")
+            ->assertOk()
+            ->assertJsonPath('reviewerNotes', []);
 
         $this->getJson("/api/investigations/{$case->id}/packages")
             ->assertOk()

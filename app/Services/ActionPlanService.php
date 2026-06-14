@@ -26,7 +26,7 @@ class ActionPlanService
         $nextBestAction = $this->nextBestAction($session, $readiness, $missingEvidence);
 
         return [
-            'contractVersion' => '1.0.0',
+            'contractVersion' => '2026-05-31',
             'objective' => $requirementsPayload['primaryIntent'] ?? EvidenceRequirementService::INTENT_UNSURE,
             'objectiveDetail' => $this->evidenceRequirements->intentLabel($session->primary_intent),
             'reviewPeriod' => [
@@ -111,6 +111,7 @@ class ActionPlanService
             'detail'   => $isReady
                 ? 'You have the minimum required evidence. Run the first review snapshot to generate findings.'
                 : 'Complete the evidence checklist to unlock the first review snapshot.',
+            'endpoint' => '/api/reviews/first-snapshot',
             'href'     => '/(dashboard)/onboarding',
             'ctaLabel' => $isReady ? 'Run snapshot' : 'Add evidence',
             'locked'   => ! $isReady,
@@ -234,12 +235,12 @@ class ActionPlanService
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return array{count: int, items: list<array<string, mixed>>}
      */
     private function openFindings(string $companyId, ?string $businessProfileId): array
     {
         if (! Schema::hasTable('alerts')) {
-            return [];
+            return ['count' => 0, 'items' => []];
         }
 
         $query = DB::table('alerts')
@@ -249,7 +250,7 @@ class ActionPlanService
             $query->where('business_profile_id', $businessProfileId);
         }
 
-        return $query
+        $items = $query
             ->orderByDesc(Schema::hasColumn('alerts', 'created_at') ? 'created_at' : 'id')
             ->limit(5)
             ->get()
@@ -261,6 +262,8 @@ class ActionPlanService
             ])
             ->values()
             ->all();
+
+        return ['count' => count($items), 'items' => $items];
     }
 
     /**
