@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\ReviewSnapshotController;
 use App\Http\Controllers\Api\SiteContentController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
+use App\Http\Controllers\Api\TaxpayerTransparencyController;
 use App\Http\Controllers\Api\TaxNoticeController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\UploadController;
@@ -291,6 +292,8 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/{id}', [CaseController::class, 'show']);
         Route::patch('/{id}', [CaseController::class, 'update']);
         Route::get('/{id}/summary', [CaseController::class, 'summary']);
+        Route::get('/{id}/transparency', [TaxpayerTransparencyController::class, 'show']);
+        Route::post('/{id}/transparency-items', [TaxpayerTransparencyController::class, 'store']);
         Route::post('/{id}/events', [CaseController::class, 'addEvent']);
         Route::post('/{id}/alerts', [CaseController::class, 'linkAlert']);
         Route::delete('/{id}/alerts/{alertId}', [CaseController::class, 'unlinkAlert']);

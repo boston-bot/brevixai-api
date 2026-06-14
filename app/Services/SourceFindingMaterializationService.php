@@ -209,12 +209,16 @@ class SourceFindingMaterializationService
             'recommended_action' => is_array($projected['recommendedAction'] ?? null)
                 ? $projected['recommendedAction']
                 : ($projected['recommended_action'] ?? null),
-            'metadata' => $this->sanitizeMetadata(array_merge($this->arrayValue($finding->metadata), [
-                'source_finding_id' => $projected['id'] ?? null,
-                'limitations' => $this->listValue($projected['limitations'] ?? []),
-                'materialized_from' => 'source_finding_adapter',
-                'contract_version' => InvestigationPlatformContractService::CONTRACT_VERSION,
-            ])),
+            'metadata' => $this->sanitizeMetadata(array_merge(
+                $this->arrayValue($finding->metadata),
+                $this->arrayValue($projected['metadata'] ?? []),
+                [
+                    'source_finding_id' => $projected['id'] ?? null,
+                    'limitations' => $this->listValue($projected['limitations'] ?? []),
+                    'materialized_from' => 'source_finding_adapter',
+                    'contract_version' => InvestigationPlatformContractService::CONTRACT_VERSION,
+                ],
+            )),
         ]);
         $finding->save();
 
