@@ -710,6 +710,10 @@ class InvestigationPlatformService
     {
         return [
             'id' => (string) $record->id,
+            'investigationId' => $record->investigation_id,
+            'investigation_id' => $record->investigation_id,
+            'findingId' => $record->finding_id,
+            'finding_id' => $record->finding_id,
             'recordType' => (string) $record->record_type,
             'record_type' => (string) $record->record_type,
             'label' => (string) $record->label,
@@ -725,6 +729,10 @@ class InvestigationPlatformService
     {
         return [
             'id' => (string) $note->id,
+            'investigationId' => $note->investigation_id,
+            'investigation_id' => $note->investigation_id,
+            'findingId' => $note->finding_id,
+            'finding_id' => $note->finding_id,
             'author_id' => $note->author_id,
             'authorId' => $note->author_id,
             'author_name' => $note->author_name,
@@ -743,6 +751,10 @@ class InvestigationPlatformService
     {
         return [
             'id' => (string) $event->id,
+            'investigationId' => $event->investigation_id,
+            'investigation_id' => $event->investigation_id,
+            'findingId' => $event->finding_id,
+            'finding_id' => $event->finding_id,
             'event_type' => (string) $event->event_type,
             'eventType' => (string) $event->event_type,
             'actor_type' => (string) $event->actor_type,

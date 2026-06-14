@@ -233,6 +233,7 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     // Findings
     Route::prefix('findings')->group(function () {
         Route::get('/', [FindingController::class, 'index']);
+        Route::post('/materialize', [FindingController::class, 'materialize']);
         Route::get('/{id}', [FindingController::class, 'show']);
         Route::post('/{id}/review', [FindingController::class, 'review']);
         Route::post('/{id}/create-investigation', [FindingController::class, 'createInvestigation']);
@@ -305,6 +306,8 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/{id}/findings', [InvestigationPlatformContractController::class, 'findings']);
         Route::get('/{id}/suggested-records', [InvestigationPlatformContractController::class, 'suggestedRecords']);
         Route::get('/{id}/activity', [InvestigationPlatformContractController::class, 'activity']);
+        Route::get('/{id}/notes', [InvestigationPlatformContractController::class, 'reviewerNotes']);
+        Route::get('/{id}/reviewer-notes', [InvestigationPlatformContractController::class, 'reviewerNotes']);
         Route::get('/{id}/packages', [InvestigationController::class, 'packages']);
         Route::post('/{id}/packages', [InvestigationController::class, 'generatePackage']);
         Route::post('/{id}/assign', [InvestigationController::class, 'assign']);

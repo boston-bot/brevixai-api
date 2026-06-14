@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\FindingService;
 use App\Services\SourceFindingAdapterService;
+use App\Services\SourceFindingMaterializationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -16,6 +17,7 @@ class FindingController extends Controller
     public function __construct(
         private readonly FindingService $findings,
         private readonly SourceFindingAdapterService $sourceFindingAdapter,
+        private readonly SourceFindingMaterializationService $sourceFindingMaterialization,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -45,6 +47,30 @@ class FindingController extends Controller
         }
 
         return response()->json($this->findings->list($context, $filters));
+    }
+
+    public function materialize(Request $request): JsonResponse
+    {
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
+        $validated = $request->validate([
+            'source_module' => ['sometimes', 'string', Rule::in(SourceFindingAdapterService::SOURCE_MODULES)],
+            'category' => ['sometimes', 'string', 'max:80'],
+            'status' => ['sometimes', 'string', 'max:80'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        try {
+            return response()->json(
+                $this->sourceFindingMaterialization->materializeFromSources($context, $request->user(), $validated),
+                201,
+            );
+        } catch (Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], $this->safeStatus($e));
+        }
     }
 
     public function show(Request $request, string $id): JsonResponse

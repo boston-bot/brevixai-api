@@ -11,7 +11,10 @@ use Illuminate\Support\Facades\DB;
 
 class FindingService
 {
-    public function __construct(private readonly InvestigationPlatformService $investigations) {}
+    public function __construct(
+        private readonly InvestigationPlatformService $investigations,
+        private readonly SourceFindingMaterializationService $sourceFindingMaterialization,
+    ) {}
 
     /** @return array<string, mixed> */
     public function list(BusinessProfileContext $context, array $filters = []): array
@@ -161,6 +164,11 @@ class FindingService
                 'investigation_id' => $investigation->id,
                 'status' => Finding::STATUS_IN_REVIEW,
             ]);
+            $this->sourceFindingMaterialization->attachFindingRecordsToInvestigation(
+                $context,
+                $finding->fresh() ?? $finding,
+                (string) $investigation->id,
+            );
 
             $this->investigations->recordEvent(
                 investigation: $investigation,

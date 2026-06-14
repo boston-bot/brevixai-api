@@ -75,7 +75,7 @@ return new class extends Migration
             $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
             $table->foreignUuid('company_id')->constrained('companies')->cascadeOnDelete();
             $table->foreignUuid('business_profile_id')->nullable()->constrained('business_profiles')->nullOnDelete();
-            $table->foreignUuid('investigation_id')->constrained('investigations')->cascadeOnDelete();
+            $table->foreignUuid('investigation_id')->nullable()->constrained('investigations')->cascadeOnDelete();
             $table->foreignUuid('finding_id')->nullable()->constrained('findings')->nullOnDelete();
             $table->foreignUuid('legacy_evidence_item_id')->nullable()->unique()->constrained('investigation_evidence_items')->nullOnDelete();
             $table->text('evidence_type');
@@ -113,7 +113,7 @@ return new class extends Migration
             $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
             $table->foreignUuid('company_id')->constrained('companies')->cascadeOnDelete();
             $table->foreignUuid('business_profile_id')->nullable()->constrained('business_profiles')->nullOnDelete();
-            $table->foreignUuid('investigation_id')->constrained('investigations')->cascadeOnDelete();
+            $table->foreignUuid('investigation_id')->nullable()->constrained('investigations')->cascadeOnDelete();
             $table->foreignUuid('finding_id')->nullable()->constrained('findings')->nullOnDelete();
             $table->text('record_type');
             $table->text('label');

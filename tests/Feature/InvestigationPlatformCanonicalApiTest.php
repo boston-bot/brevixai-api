@@ -77,7 +77,27 @@ class InvestigationPlatformCanonicalApiTest extends TestCase
         $this->getJson("/api/investigations/{$investigationId}", $this->profileHeaders($profileId))
             ->assertOk()
             ->assertJsonPath('investigation.notes.0.body', 'Reviewer confirmed the scope.')
-            ->assertJsonPath('reviewer_notes.0.body', 'Reviewer confirmed the scope.');
+            ->assertJsonPath('reviewer_notes.0.body', 'Reviewer confirmed the scope.')
+            ->assertJsonPath('reviewer_notes.0.investigationId', $investigationId);
+
+        $this->getJson("/api/investigations/{$investigationId}/contract", $this->profileHeaders($profileId))
+            ->assertOk()
+            ->assertJsonPath('contractVersion', '2026-06-12')
+            ->assertJsonPath('investigation.id', $investigationId)
+            ->assertJsonPath('investigation.status', 'in_review')
+            ->assertJsonPath('investigation.reviewerNoteIds.0', DB::table('reviewer_notes')->where('investigation_id', $investigationId)->value('id'))
+            ->assertJsonPath('reviewerNotes.0.body', 'Reviewer confirmed the scope.')
+            ->assertJsonPath('reviewEvents.0.investigationId', $investigationId);
+
+        $this->getJson("/api/investigations/{$investigationId}/reviewer-notes", $this->profileHeaders($profileId))
+            ->assertOk()
+            ->assertJsonPath('contractVersion', '2026-06-12')
+            ->assertJsonPath('investigationId', $investigationId)
+            ->assertJsonPath('reviewerNotes.0.body', 'Reviewer confirmed the scope.');
+
+        $this->getJson("/api/investigations/{$investigationId}/notes", $this->profileHeaders($profileId))
+            ->assertOk()
+            ->assertJsonPath('reviewerNotes.0.investigationId', $investigationId);
     }
 
     public function test_findings_review_flow_opens_investigation_and_adds_reviewer_note(): void

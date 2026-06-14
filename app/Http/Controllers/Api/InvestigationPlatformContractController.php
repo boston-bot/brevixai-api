@@ -26,12 +26,12 @@ class InvestigationPlatformContractController extends Controller
      */
     public function investigation(Request $request, string $id): JsonResponse
     {
-        $companyId = $this->companyId($request);
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $payload = $this->contractService->investigationContract($companyId, $id);
+        $payload = $this->contractService->investigationContractForContext($context, $id);
         if (! $payload) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
@@ -44,12 +44,12 @@ class InvestigationPlatformContractController extends Controller
      */
     public function findings(Request $request, string $id): JsonResponse
     {
-        $companyId = $this->companyId($request);
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $payload = $this->contractService->findings($companyId, $id);
+        $payload = $this->contractService->findingsForContext($context, $id);
         if (! $payload) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
@@ -62,12 +62,12 @@ class InvestigationPlatformContractController extends Controller
      */
     public function suggestedRecords(Request $request, string $id): JsonResponse
     {
-        $companyId = $this->companyId($request);
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $payload = $this->contractService->suggestedRecords($companyId, $id);
+        $payload = $this->contractService->suggestedRecordsForContext($context, $id);
         if (! $payload) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
@@ -80,12 +80,31 @@ class InvestigationPlatformContractController extends Controller
      */
     public function activity(Request $request, string $id): JsonResponse
     {
-        $companyId = $this->companyId($request);
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $payload = $this->contractService->reviewEvents($companyId, $id);
+        $payload = $this->contractService->reviewEventsForContext($context, $id);
+        if (! $payload) {
+            return response()->json(['error' => 'Investigation not found'], 404);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * GET /api/investigations/{id}/reviewer-notes
+     * GET /api/investigations/{id}/notes
+     */
+    public function reviewerNotes(Request $request, string $id): JsonResponse
+    {
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
+        $payload = $this->contractService->reviewerNotesForContext($context, $id);
         if (! $payload) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
@@ -98,21 +117,16 @@ class InvestigationPlatformContractController extends Controller
      */
     public function packages(Request $request, string $id): JsonResponse
     {
-        $companyId = $this->companyId($request);
-        if (! $companyId) {
-            return response()->json(['error' => 'No company associated with account'], 403);
+        $context = $this->resolveBusinessProfileContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
         }
 
-        $payload = $this->contractService->casePackages($companyId, $id);
+        $payload = $this->contractService->casePackagesForContext($context, $id);
         if (! $payload) {
             return response()->json(['error' => 'Investigation not found'], 404);
         }
 
         return response()->json($payload);
-    }
-
-    private function companyId(Request $request): ?string
-    {
-        return $request->user()?->company_id;
     }
 }
