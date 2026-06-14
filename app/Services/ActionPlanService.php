@@ -128,7 +128,7 @@ class ActionPlanService
         $hasSources = count($dataSources['sources'] ?? []) > 0;
 
         return [
-            'newSinceLastVisit' => [],
+            'newSinceLastVisit' => true,
             'sourcesChanged' => $hasSources,
             'findingsChanged' => false,
             'readinessChanged' => false,
