@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\UploadController;
 use App\Http\Controllers\Api\WorkspaceMemberController;
 use App\Http\Controllers\Chat\AgentChatController;
 use App\Http\Controllers\Internal\AgentToolController;
+use App\Http\Controllers\Internal\FraudPlaybookSearchController;
 use App\Http\Controllers\Internal\IrmKnowledgeController;
 use Illuminate\Support\Facades\Route;
 
@@ -106,6 +107,8 @@ Route::prefix('internal/agent-tools')
         Route::get('/irs/collection-risk', [IrmKnowledgeController::class, 'collectionRisk']);
         Route::post('/irs/notice/extract', [IrmKnowledgeController::class, 'extractNotice']);
         Route::post('/company/{companyId}/findings', [AgentToolController::class, 'storeFindings']);
+        Route::get('/fraud/playbooks/search', [FraudPlaybookSearchController::class, 'search']);
+        Route::post('/fraud/playbooks/feedback', [FraudPlaybookSearchController::class, 'feedback']);
     });
 
 Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
