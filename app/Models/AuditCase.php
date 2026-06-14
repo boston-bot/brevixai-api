@@ -81,6 +81,11 @@ class AuditCase extends Model
         return $this->hasMany(InvestigationReportExport::class, 'audit_case_id')->orderByDesc('generated_at');
     }
 
+    public function taxpayerTransparencyItems(): HasMany
+    {
+        return $this->hasMany(TaxpayerTransparencyItem::class)->orderBy('created_at');
+    }
+
     public function investigationAssignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'investigation_assigned_user_id');

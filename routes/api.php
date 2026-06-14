@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\ReviewSnapshotController;
 use App\Http\Controllers\Api\SiteContentController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
+use App\Http\Controllers\Api\TaxpayerTransparencyController;
 use App\Http\Controllers\Api\TaxNoticeController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\UploadController;
@@ -233,6 +234,7 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
     // Findings
     Route::prefix('findings')->group(function () {
         Route::get('/', [FindingController::class, 'index']);
+        Route::post('/materialize', [FindingController::class, 'materialize']);
         Route::get('/{id}', [FindingController::class, 'show']);
         Route::post('/{id}/review', [FindingController::class, 'review']);
         Route::post('/{id}/create-investigation', [FindingController::class, 'createInvestigation']);
@@ -290,6 +292,8 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/{id}', [CaseController::class, 'show']);
         Route::patch('/{id}', [CaseController::class, 'update']);
         Route::get('/{id}/summary', [CaseController::class, 'summary']);
+        Route::get('/{id}/transparency', [TaxpayerTransparencyController::class, 'show']);
+        Route::post('/{id}/transparency-items', [TaxpayerTransparencyController::class, 'store']);
         Route::post('/{id}/events', [CaseController::class, 'addEvent']);
         Route::post('/{id}/alerts', [CaseController::class, 'linkAlert']);
         Route::delete('/{id}/alerts/{alertId}', [CaseController::class, 'unlinkAlert']);
@@ -305,6 +309,8 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         Route::get('/{id}/findings', [InvestigationPlatformContractController::class, 'findings']);
         Route::get('/{id}/suggested-records', [InvestigationPlatformContractController::class, 'suggestedRecords']);
         Route::get('/{id}/activity', [InvestigationPlatformContractController::class, 'activity']);
+        Route::get('/{id}/notes', [InvestigationPlatformContractController::class, 'reviewerNotes']);
+        Route::get('/{id}/reviewer-notes', [InvestigationPlatformContractController::class, 'reviewerNotes']);
         Route::get('/{id}/packages', [InvestigationController::class, 'packages']);
         Route::post('/{id}/packages', [InvestigationController::class, 'generatePackage']);
         Route::post('/{id}/assign', [InvestigationController::class, 'assign']);

@@ -27,6 +27,15 @@ class RouteContractTest extends TestCase
             'GET api/entity-graph/node/{id}',
             'GET api/investigation-platform/contract',
             'GET api/findings',
+            'POST api/findings/materialize',
+            'GET api/investigations/{id}/contract',
+            'GET api/investigations/{id}/findings',
+            'GET api/investigations/{id}/suggested-records',
+            'GET api/investigations/{id}/activity',
+            'GET api/investigations/{id}/notes',
+            'GET api/investigations/{id}/reviewer-notes',
+            'GET api/investigations/{id}/packages',
+            'POST api/investigations/{id}/packages',
         ];
 
         $registered = $this->registeredRoutes();

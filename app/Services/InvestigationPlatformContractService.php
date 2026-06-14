@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Support\ProfessionalServicesDisclaimer;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class InvestigationPlatformContractService
@@ -94,6 +95,7 @@ class InvestigationPlatformContractService
 
     public function __construct(
         private readonly InvestigationService $investigationService,
+        private readonly InvestigationPlatformService $platformService,
     ) {}
 
     /**
@@ -110,6 +112,7 @@ class InvestigationPlatformContractService
                 'Finding',
                 'EvidenceItem',
                 'SuggestedRecord',
+                'ReviewerNote',
                 'ReviewEvent',
                 'CasePackage',
             ],
@@ -124,6 +127,7 @@ class InvestigationPlatformContractService
                 'evidenceTypes' => self::EVIDENCE_TYPES,
                 'suggestedRecordPriorities' => ['required', 'recommended', 'optional'],
                 'suggestedRecordStatuses' => self::SUGGESTED_RECORD_STATUSES,
+                'reviewerNoteVisibilities' => ['internal', 'client', 'package'],
                 'reviewActorTypes' => ['user', 'system', 'agent'],
                 'packageFormats' => self::PACKAGE_FORMATS,
             ],
@@ -132,6 +136,7 @@ class InvestigationPlatformContractService
                 'finding' => $this->findingShape(),
                 'evidenceItem' => $this->evidenceItemShape(),
                 'suggestedRecord' => $this->suggestedRecordShape(),
+                'reviewerNote' => $this->reviewerNoteShape(),
                 'reviewEvent' => $this->reviewEventShape(),
                 'casePackage' => $this->casePackageShape(),
             ],
@@ -142,6 +147,113 @@ class InvestigationPlatformContractService
                 'disclaimer' => ProfessionalServicesDisclaimer::TEXT,
             ],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function investigationContractForContext(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        $canonical = $this->canonicalInvestigationContract($context, $investigationId);
+        if ($canonical) {
+            return $canonical;
+        }
+
+        return $this->investigationContract($context->companyId, $investigationId);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findingsForContext(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        $canonical = $this->canonicalInvestigationContract($context, $investigationId);
+        if ($canonical) {
+            return [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'investigationId' => $investigationId,
+                'findings' => $canonical['findings'],
+            ];
+        }
+
+        return $this->findings($context->companyId, $investigationId);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function suggestedRecordsForContext(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        $canonical = $this->canonicalInvestigationContract($context, $investigationId);
+        if ($canonical) {
+            return [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'investigationId' => $investigationId,
+                'suggestedRecords' => $canonical['suggestedRecords'],
+            ];
+        }
+
+        return $this->suggestedRecords($context->companyId, $investigationId);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function reviewerNotesForContext(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        $canonical = $this->canonicalInvestigationContract($context, $investigationId);
+        if ($canonical) {
+            return [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'investigationId' => $investigationId,
+                'reviewerNotes' => $canonical['reviewerNotes'],
+            ];
+        }
+
+        $detail = $this->investigationService->detail($context->companyId, $investigationId);
+        if (! $detail) {
+            return null;
+        }
+
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            'investigationId' => $investigationId,
+            'reviewerNotes' => $this->reviewerNotesFromDetail($detail),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function reviewEventsForContext(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        $canonical = $this->canonicalInvestigationContract($context, $investigationId);
+        if ($canonical) {
+            return [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'investigationId' => $investigationId,
+                'reviewEvents' => $canonical['reviewEvents'],
+            ];
+        }
+
+        return $this->reviewEvents($context->companyId, $investigationId);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function casePackagesForContext(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        $canonical = $this->canonicalInvestigationContract($context, $investigationId);
+        if ($canonical) {
+            return [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'investigationId' => $investigationId,
+                'casePackages' => $canonical['casePackages'],
+            ];
+        }
+
+        return $this->casePackages($context->companyId, $investigationId);
     }
 
     /**
@@ -234,6 +346,113 @@ class InvestigationPlatformContractService
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    private function canonicalInvestigationContract(BusinessProfileContext $context, string $investigationId): ?array
+    {
+        if (! Schema::hasTable('investigations')) {
+            return null;
+        }
+
+        $detail = $this->platformService->detail($context, $investigationId);
+        if (! $detail) {
+            return null;
+        }
+
+        $investigation = is_array($detail['investigation'] ?? null) ? $detail['investigation'] : [];
+        $findings = $this->collectionToArray($detail['findings'] ?? $investigation['findings'] ?? []);
+        $evidenceItems = $this->collectionToArray($detail['evidence_items'] ?? $detail['evidenceItems'] ?? $investigation['evidence_items'] ?? []);
+        $suggestedRecords = $this->collectionToArray($detail['suggested_records'] ?? $detail['suggestedRecords'] ?? $investigation['suggested_records'] ?? []);
+        $reviewerNotes = $this->collectionToArray($detail['reviewer_notes'] ?? $detail['reviewerNotes'] ?? $investigation['notes'] ?? []);
+        $reviewEvents = $this->collectionToArray($detail['activity_timeline'] ?? $detail['reviewEvents'] ?? $investigation['activity_timeline'] ?? []);
+        $casePackages = $this->collectionToArray($detail['case_packages'] ?? $detail['casePackages'] ?? $investigation['casePackages'] ?? []);
+
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            'investigation' => $this->canonicalInvestigationFromPayload(
+                $investigation,
+                $findings,
+                $evidenceItems,
+                $reviewerNotes,
+                $casePackages,
+            ),
+            'findings' => $findings,
+            'evidenceItems' => $evidenceItems,
+            'suggestedRecords' => $suggestedRecords,
+            'reviewerNotes' => $reviewerNotes,
+            'reviewEvents' => $reviewEvents,
+            'casePackages' => $casePackages,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $investigation
+     * @param list<array<string, mixed>> $findings
+     * @param list<array<string, mixed>> $evidenceItems
+     * @param list<array<string, mixed>> $reviewerNotes
+     * @param list<array<string, mixed>> $casePackages
+     * @return array<string, mixed>
+     */
+    private function canonicalInvestigationFromPayload(
+        array $investigation,
+        array $findings,
+        array $evidenceItems,
+        array $reviewerNotes,
+        array $casePackages,
+    ): array {
+        $reviewPeriod = is_array($investigation['reviewPeriod'] ?? null) ? $investigation['reviewPeriod'] : [];
+        $scopeLimitations = is_array($investigation['scopeLimitations'] ?? null)
+            ? $investigation['scopeLimitations']
+            : [];
+
+        return [
+            'id' => (string) ($investigation['id'] ?? ''),
+            'workspaceId' => (string) ($investigation['workspaceId'] ?? $investigation['company_id'] ?? ''),
+            'clientOrCompanyId' => (string) ($investigation['clientOrCompanyId'] ?? $investigation['business_profile_id'] ?? ''),
+            'title' => (string) ($investigation['title'] ?? ''),
+            'category' => $this->normalizeCategory((string) ($investigation['category'] ?? 'unsure')),
+            'subcategory' => $investigation['subcategory'] ?? null,
+            'status' => $this->canonicalInvestigationStatus((string) ($investigation['investigation_status'] ?? $investigation['status'] ?? 'open')),
+            'priority' => $this->canonicalPriority((string) ($investigation['investigation_priority'] ?? $investigation['priority'] ?? 'medium')),
+            'reviewPeriod' => [
+                'startDate' => $reviewPeriod['startDate'] ?? $reviewPeriod['start'] ?? $reviewPeriod['start_date'] ?? null,
+                'endDate' => $reviewPeriod['endDate'] ?? $reviewPeriod['end'] ?? $reviewPeriod['end_date'] ?? null,
+                'label' => $reviewPeriod['label'] ?? null,
+            ],
+            'scopeStatement' => (string) ($investigation['scopeStatement'] ?? $investigation['summary'] ?? ''),
+            'scopeLimitations' => array_values(array_filter($scopeLimitations)),
+            'assignedTo' => $investigation['assignedTo'] ?? (
+                isset($investigation['assigned_to_id']) || isset($investigation['assigned_to_name'])
+                    ? [
+                        'id' => $investigation['assigned_to_id'] ?? null,
+                        'name' => $investigation['assigned_to_name'] ?? null,
+                    ]
+                    : null
+            ),
+            'createdBy' => $investigation['createdBy'] ?? $investigation['created_by'] ?? null,
+            'openedAt' => $investigation['openedAt'] ?? $investigation['created_at'] ?? null,
+            'lastActivityAt' => $investigation['lastActivityAt'] ?? $investigation['last_activity_at'] ?? null,
+            'closedAt' => $investigation['closedAt'] ?? null,
+            'sourceFindingIds' => $this->idsFrom($findings),
+            'evidenceItemIds' => $this->idsFrom($evidenceItems),
+            'reviewerNoteIds' => $this->idsFrom($reviewerNotes),
+            'packageIds' => $this->idsFrom($casePackages),
+        ];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @return list<string>
+     */
+    private function idsFrom(array $items): array
+    {
+        return array_values(array_filter(array_map(
+            fn (array $item): string => (string) ($item['id'] ?? ''),
+            $items,
+        )));
+    }
+
+    /**
      * @param array<string, mixed> $detail
      * @return array<string, mixed>
      */
@@ -278,7 +497,10 @@ class InvestigationPlatformContractService
                 fn (array $item): string => $item['id'],
                 $this->evidenceItemsFromDetail($detail)
             )),
-            'reviewerNoteIds' => [],
+            'reviewerNoteIds' => array_values(array_map(
+                fn (array $note): string => $note['id'],
+                $this->reviewerNotesFromDetail($detail)
+            )),
             'packageIds' => array_values(array_map(
                 fn (array $package): string => $package['id'],
                 $this->casePackagesFromDetail($detail)
@@ -453,6 +675,45 @@ class InvestigationPlatformContractService
                 'metadata' => $metadata,
             ];
         }, $this->collectionToArray($detail['activity_timeline'] ?? []));
+    }
+
+    /**
+     * @param array<string, mixed> $detail
+     * @return list<array<string, mixed>>
+     */
+    private function reviewerNotesFromDetail(array $detail): array
+    {
+        $investigationId = (string) (($detail['investigation']['id'] ?? '') ?: '');
+        $workspace = $detail['workspace'] ?? [];
+        $notes = $this->collectionToArray($detail['reviewer_notes'] ?? $detail['notes'] ?? []);
+
+        if ($notes === [] && ! empty($workspace['investigation_notes'])) {
+            $notes[] = [
+                'id' => "reviewer-note:legacy:{$investigationId}",
+                'investigationId' => $investigationId,
+                'findingId' => null,
+                'authorId' => null,
+                'authorName' => null,
+                'body' => (string) $workspace['investigation_notes'],
+                'visibility' => 'internal',
+                'createdAt' => $detail['investigation']['created_at'] ?? null,
+                'updatedAt' => $detail['investigation']['updated_at'] ?? null,
+            ];
+        }
+
+        return array_values(array_map(function (array $note) use ($investigationId): array {
+            return [
+                'id' => (string) ($note['id'] ?? Str::uuid()),
+                'investigationId' => (string) ($note['investigationId'] ?? $note['investigation_id'] ?? $investigationId),
+                'findingId' => $note['findingId'] ?? $note['finding_id'] ?? null,
+                'authorId' => $note['authorId'] ?? $note['author_id'] ?? null,
+                'authorName' => $note['authorName'] ?? $note['author_name'] ?? null,
+                'body' => (string) ($note['body'] ?? ''),
+                'visibility' => (string) ($note['visibility'] ?? 'internal'),
+                'createdAt' => $note['createdAt'] ?? $note['created_at'] ?? null,
+                'updatedAt' => $note['updatedAt'] ?? $note['updated_at'] ?? null,
+            ];
+        }, $notes));
     }
 
     /**
@@ -770,6 +1031,22 @@ class InvestigationPlatformContractService
             'priority' => 'required|recommended|optional',
             'status' => 'requested|received|waived|not_available',
             'satisfyingEvidenceItemId' => 'string|null',
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function reviewerNoteShape(): array
+    {
+        return [
+            'id' => 'string',
+            'investigationId' => 'string',
+            'findingId' => 'string|null',
+            'authorId' => 'string|null',
+            'authorName' => 'string|null',
+            'body' => 'string',
+            'visibility' => 'internal|client|package',
+            'createdAt' => 'ISO8601|null',
+            'updatedAt' => 'ISO8601|null',
         ];
     }
 
