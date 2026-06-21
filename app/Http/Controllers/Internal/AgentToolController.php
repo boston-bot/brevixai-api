@@ -381,12 +381,10 @@ class AgentToolController extends Controller
             $executableTypes = $executorService->supportedActionTypes();
 
             $actionTypes = [
-                ['type' => 'create_alert',    'requires_approval' => true,  'executable' => in_array('create_alert', $executableTypes),    'display_name' => 'Create Alert'],
-                ['type' => 'draft_case',       'requires_approval' => true,  'executable' => in_array('draft_case', $executableTypes),       'display_name' => 'Draft Case'],
-                ['type' => 'send_email',       'requires_approval' => true,  'executable' => in_array('send_email', $executableTypes),       'display_name' => 'Send Email'],
+                ['type' => 'create_alert',     'requires_approval' => true,  'executable' => in_array('create_alert', $executableTypes),     'display_name' => 'Create Alert'],
+                ['type' => 'create_case',      'requires_approval' => true,  'executable' => in_array('create_case', $executableTypes),      'display_name' => 'Create Case'],
                 ['type' => 'flag_transaction', 'requires_approval' => true,  'executable' => in_array('flag_transaction', $executableTypes), 'display_name' => 'Flag Transaction'],
-                ['type' => 'finalize_case',    'requires_approval' => true,  'executable' => in_array('finalize_case', $executableTypes),    'display_name' => 'Finalize Case'],
-                ['type' => 'update_case',      'requires_approval' => true,  'executable' => in_array('update_case', $executableTypes),      'display_name' => 'Update Case'],
+                ['type' => 'escalate_review',  'requires_approval' => true,  'executable' => in_array('escalate_review', $executableTypes),  'display_name' => 'Escalate Review'],
                 ['type' => 'review_dashboard', 'requires_approval' => false, 'executable' => false, 'display_name' => 'Review Dashboard'],
                 ['type' => 'review_findings',  'requires_approval' => false, 'executable' => false, 'display_name' => 'Review Findings'],
             ];

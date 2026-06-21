@@ -661,6 +661,8 @@ Reports should not be a separate analysis surface.
 
 Rex should be positioned as an investigation assistant.
 
+Rex and agent-service work should come fourth in the implementation sequence, after normalized investigation contracts and APIs exist. Rex should consume canonical investigation, finding, evidence, suggested-record, note, activity, and package APIs rather than learning the old route-specific payload shapes. Until those APIs exist, Rex work should stay limited to positioning, navigation, prompt guardrails, and compatibility behavior.
+
 It can:
 
 - explain findings
@@ -676,6 +678,7 @@ It should not:
 - mark findings reviewed without explicit user action
 - generate packages automatically without a reviewer action
 - execute risky mutations without approval
+- call source-module routes directly for new investigation answers when normalized investigation APIs are available
 
 ## Module Deepening Opportunities
 
@@ -1010,7 +1013,28 @@ Acceptance criteria:
 - Existing case links still resolve.
 - Investigations can include findings from multiple source modules.
 
-### Phase 4: Evidence Ledger
+### Phase 4: Rex And Agent Consumption
+
+Goal:
+
+Move Rex and `brevixai-agents` onto the normalized investigation APIs after the shared contracts exist.
+
+Tasks:
+
+- Update Rex routing and agent tool contracts to read canonical investigations, findings, evidence references, suggested records, reviewer notes, activity, and package metadata.
+- Replace direct route-specific assumptions with normalized investigation category, source module, evidence reference, and limitation metadata.
+- Require Rex answers and agent summaries to cite normalized evidence references or state when no supporting evidence is available.
+- Keep mutations approval-backed and reviewer-owned.
+- Preserve legacy route compatibility through adapters during migration, but do not let new Rex or agent logic depend on old page-specific payloads.
+
+Acceptance criteria:
+
+- Rex can answer investigation questions without knowing whether the finding originated from tax notices, reconciliation, transactions, alerts, vendor risk, or another route.
+- Agent tools advertise normalized investigation capabilities and only touch source-specific routes through compatibility adapters.
+- Rex and agent outputs cite canonical evidence references, suggested records, and limitations.
+- Tests fail if new Rex or agent investigation flows bypass normalized APIs once those APIs are available.
+
+### Phase 5: Evidence Ledger
 
 Goal:
 
@@ -1030,7 +1054,7 @@ Acceptance criteria:
 - Each finding can show supporting evidence and missing records.
 - Package export can include evidence references consistently.
 
-### Phase 5: Package Builder
+### Phase 6: Package Builder
 
 Goal:
 
@@ -1080,6 +1104,7 @@ Acceptance criteria:
 
 - Existing routes remain reachable during migration.
 - Existing Action Plan contract normalizers still accept legacy keys.
+- Rex and agent investigation flows consume normalized APIs once available instead of direct route-specific payloads.
 - User-triggered package generation remains explicit.
 - Sensitive review metadata is not rendered in public-facing drawers or report previews.
 
@@ -1092,6 +1117,10 @@ The taxonomy can expand too quickly. Mitigation: ship with the current strongest
 ### Risk: Backend Contract Lag
 
 The frontend can reframe faster than the Laravel API can normalize data. Mitigation: use frontend adapters and preserve legacy payload normalizers during migration.
+
+### Risk: Rex/Agents Encode Route-Specific Assumptions
+
+If Rex or `brevixai-agents` starts consuming investigation data before normalized APIs exist, they can hardcode legacy route payloads into prompts, tools, and answer formats. Mitigation: sequence Rex and agent expansion fourth, after normalized investigation contracts and APIs, and keep interim Rex work to positioning, navigation, prompt guardrails, and compatibility behavior.
 
 ### Risk: Legal/Tax/Fraud Claims
 
