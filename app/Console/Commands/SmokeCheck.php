@@ -54,8 +54,11 @@ class SmokeCheck extends Command
 
         $this->section('Agent Tool Payload Contract');
         $this->check('GET  api/internal/agent-tools/process-registry', fn () => $this->routeExists('GET', 'api/internal/agent-tools/process-registry'));
-        foreach ($this->registeredAgentToolUris() as $toolKey => $uri) {
-            $this->check("{$toolKey} route payload resolves", fn () => $this->routeExists('GET', $uri));
+        foreach ($this->registeredAgentToolRoutes() as $toolKey => $route) {
+            $this->check(
+                "{$toolKey} route payload resolves ({$route['method']})",
+                fn () => $this->routeExists($route['method'], $route['uri'])
+            );
         }
 
         $this->section('Scheduled Commands');
@@ -122,13 +125,15 @@ class SmokeCheck extends Command
     /**
      * @return array<string, string>
      */
-    private function registeredAgentToolUris(): array
+    private function registeredAgentToolRoutes(): array
     {
         $companyId = '{companyId}';
 
-        return collect(AgentToolRegistry::routeSuffixes())
-            ->reject(fn (string $suffix): bool => $suffix === 'process-registry')
-            ->map(fn (string $suffix): string => 'api/internal/agent-tools/'.str_replace('{companyId}', $companyId, $suffix))
+        return collect(AgentToolRegistry::definitions())
+            ->map(fn (array $definition): array => [
+                'method' => (string) $definition['method'],
+                'uri' => 'api/internal/agent-tools/'.str_replace('{companyId}', $companyId, (string) $definition['path_suffix']),
+            ])
             ->all();
     }
 }

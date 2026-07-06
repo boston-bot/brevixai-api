@@ -26,33 +26,53 @@ class ProcessRegistryParityTest extends TestCase
      */
     public function test_all_registry_tool_keys_have_a_matching_route(): void
     {
-        $registeredUris = $this->internalToolUris();
-        $routeSuffixes = AgentToolRegistry::routeSuffixes();
-
-        // Normalize registered URIs by replacing UUIDs and parameter tokens.
-        $normalizedRegistered = array_map(
-            fn (string $uri) => preg_replace('/\{[^}]+\}/', '{companyId}', $uri),
-            $registeredUris
-        );
+        $registeredRoutes = $this->registeredRoutes();
+        $definitions = AgentToolRegistry::definitions();
 
         foreach (RexProcess::cases() as $process) {
             foreach ($process->tools() as $toolKey) {
                 $this->assertArrayHasKey(
                     $toolKey,
-                    $routeSuffixes,
-                    "Tool key '{$toolKey}' has no entry in AgentToolRegistry::routeSuffixes()."
+                    $definitions,
+                    "Tool key '{$toolKey}' has no entry in AgentToolRegistry::definitions()."
                 );
 
-                $expectedSuffix = $routeSuffixes[$toolKey];
-                $expectedUri = 'api/internal/agent-tools/' . $expectedSuffix;
+                $definition = $definitions[$toolKey];
+                $expectedRoute = $this->expectedToolRoute($definition);
 
                 $this->assertContains(
-                    $expectedUri,
-                    $normalizedRegistered,
-                    "Tool key '{$toolKey}' (process '{$process->value}') expects route '{$expectedUri}' but it is not registered."
+                    $expectedRoute,
+                    $registeredRoutes,
+                    "Tool key '{$toolKey}' (process '{$process->value}') expects route '{$expectedRoute}' but it is not registered."
                 );
             }
         }
+    }
+
+    public function test_all_tool_catalog_definitions_have_matching_routes(): void
+    {
+        $registeredRoutes = $this->registeredRoutes();
+
+        foreach (AgentToolRegistry::definitions() as $toolKey => $definition) {
+            $expectedRoute = $this->expectedToolRoute($definition);
+
+            $this->assertContains(
+                $expectedRoute,
+                $registeredRoutes,
+                "Catalog tool '{$toolKey}' expects route '{$expectedRoute}' but it is not registered."
+            );
+        }
+    }
+
+    public function test_irs_notice_extract_is_in_method_aware_tool_catalog(): void
+    {
+        $definition = AgentToolRegistry::definition('irs_notice_extract');
+
+        $this->assertIsArray($definition);
+        $this->assertSame('POST', $definition['method']);
+        $this->assertSame('irs/notice/extract', $definition['path_suffix']);
+        $this->assertSame('global', $definition['scope']);
+        $this->assertContains('text', $definition['request_schema']['json']);
     }
 
     /**
@@ -144,26 +164,22 @@ class ProcessRegistryParityTest extends TestCase
     public function test_phase4_expansion_tool_keys_have_registered_routes(): void
     {
         $expansionKeys = ['transaction_detail', 'pending_recommendations', 'process_registry'];
-        $routeSuffixes = AgentToolRegistry::routeSuffixes();
-        $normalizedRegistered = array_map(
-            fn (string $uri) => preg_replace('/\{[^}]+\}/', '{companyId}', $uri),
-            $this->internalToolUris()
-        );
+        $definitions = AgentToolRegistry::definitions();
+        $registeredRoutes = $this->registeredRoutes();
 
         foreach ($expansionKeys as $toolKey) {
             $this->assertArrayHasKey(
                 $toolKey,
-                $routeSuffixes,
-                "Phase 4 tool key '{$toolKey}' is missing from AgentToolRegistry::routeSuffixes()."
+                $definitions,
+                "Phase 4 tool key '{$toolKey}' is missing from AgentToolRegistry::definitions()."
             );
 
-            $normalizedExpected = preg_replace('/\{[^}]+\}/', '{companyId}', $routeSuffixes[$toolKey]);
-            $expectedUri = 'api/internal/agent-tools/' . $normalizedExpected;
+            $expectedRoute = $this->expectedToolRoute($definitions[$toolKey]);
 
             $this->assertContains(
-                $expectedUri,
-                $normalizedRegistered,
-                "Phase 4 tool key '{$toolKey}' expects route '{$expectedUri}' but it is not registered."
+                $expectedRoute,
+                $registeredRoutes,
+                "Phase 4 tool key '{$toolKey}' expects route '{$expectedRoute}' but it is not registered."
             );
         }
     }
@@ -209,16 +225,6 @@ class ProcessRegistryParityTest extends TestCase
     }
 
     /** @return list<string> */
-    private function internalToolUris(): array
-    {
-        return collect(Route::getRoutes()->getRoutes())
-            ->filter(fn ($r) => str_starts_with($r->uri(), 'api/internal/agent-tools'))
-            ->map(fn ($r) => $r->uri())
-            ->values()
-            ->all();
-    }
-
-    /** @return list<string> */
     private function registeredRoutes(): array
     {
         $routes = [];
@@ -231,5 +237,13 @@ class ProcessRegistryParityTest extends TestCase
             }
         }
         return array_values(array_unique($routes));
+    }
+
+    /** @param array<string, mixed> $definition */
+    private function expectedToolRoute(array $definition): string
+    {
+        $path = preg_replace('/\{[^}]+\}/', '{companyId}', (string) $definition['path_suffix']);
+
+        return $definition['method'].' api/internal/agent-tools/'.$path;
     }
 }
