@@ -202,6 +202,24 @@ class AgentToolRegistry
                 responseSchema: ['status', 'notice_type', 'deadline_days', 'required_action', 'risk_level', 'results', 'disclaimer'],
                 advertiseByDefault: false,
             ),
+            'fraud_playbook_search' => self::globalTool(
+                method: 'GET',
+                path: 'fraud/playbooks/search',
+                optional: true,
+                purpose: 'Retrieve source-backed fraud investigation playbooks with corpus version, lexical scoring metadata, snippets, and citations.',
+                requestSchema: ['query' => ['query', 'limit']],
+                responseSchema: ['status', 'corpus_id', 'corpus_version', 'scoring', 'results', 'citations', 'data'],
+                advertiseByDefault: false,
+            ),
+            'fraud_playbook_feedback' => self::globalTool(
+                method: 'POST',
+                path: 'fraud/playbooks/feedback',
+                optional: true,
+                purpose: 'Capture relevance feedback for fraud playbook retrieval results.',
+                requestSchema: ['json' => ['playbook_id', 'query_text', 'relevance_score', 'user_feedback']],
+                responseSchema: ['message', 'data'],
+                advertiseByDefault: false,
+            ),
         ];
     }
 

@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Internal;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Fraud\InvestigationPlaybook;
 use App\Models\Fraud\RetrievalFeedback;
+use App\Services\Retrieval\FraudPlaybookRetriever;
+use App\Services\Retrieval\RetrievalQuery;
+use App\Services\Retrieval\RetrievalService;
 use Illuminate\Http\JsonResponse;
 
 class FraudPlaybookSearchController extends Controller
@@ -13,30 +15,25 @@ class FraudPlaybookSearchController extends Controller
     /**
      * Search for fraud playbooks.
      */
-    public function search(Request $request): JsonResponse
+    public function search(Request $request, RetrievalService $retrieval): JsonResponse
     {
         $request->validate([
             'query' => 'required|string',
             'limit' => 'integer|min:1|max:20',
         ]);
 
-        $queryStr = $request->input('query');
-        $limit = $request->input('limit', 5);
+        $response = $retrieval->search(new RetrievalQuery(
+            corpusId: FraudPlaybookRetriever::CORPUS_ID,
+            query: (string) $request->input('query'),
+            limit: (int) $request->input('limit', 5),
+        ))->toArray();
 
-        // Standard text-based search as a baseline
-        $playbooks = InvestigationPlaybook::where('is_active', true)
-            ->where(function ($query) use ($queryStr) {
-                $query->where('title', 'LIKE', '%' . $queryStr . '%')
-                      ->orWhere('category', 'LIKE', '%' . $queryStr . '%')
-                      ->orWhere('intent_key', 'LIKE', '%' . $queryStr . '%');
-            })
-            ->with(['source'])
-            ->limit($limit)
-            ->get();
+        $response['data'] = array_map(
+            fn (array $result): array => $result['document'],
+            $response['results']
+        );
 
-        return response()->json([
-            'data' => $playbooks
-        ]);
+        return response()->json($response);
     }
 
     /**
