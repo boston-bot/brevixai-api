@@ -151,7 +151,7 @@ class RexChatRouterService
                 ? $decision['requested_action']
                 : RexProcess::RiskReview->value;
 
-            $process = RexProcess::resolveOrDefault($requestedAction);
+            $process = RexProcess::tryFrom($requestedAction) ?? RexProcess::RiskReview;
 
             // An unavailable process routes to direct rather than failing.
             if ($process->readiness() === ProcessReadiness::Unavailable) {
@@ -164,6 +164,15 @@ class RexChatRouterService
             }
 
             if ($process->mode() === 'orchestrator') {
+                if (! in_array($process->value, $this->orchestrator->supportedRoutes(), true)) {
+                    return [
+                        'mode' => 'direct',
+                        'route' => null,
+                        'requested_action' => null,
+                        'reason' => 'orchestrator_route_unavailable_fallback',
+                    ];
+                }
+
                 return [
                     'mode' => 'orchestrator',
                     'route' => $process->value,

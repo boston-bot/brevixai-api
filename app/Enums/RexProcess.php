@@ -94,8 +94,8 @@ enum RexProcess: string
             self::CaseManagement,
             self::RecommendationReview => ProcessReadiness::Available,
             self::Reporting,
-            self::BehavioralAnalysis,
-            self::TaxNoticeReview => ProcessReadiness::Preview,
+            self::BehavioralAnalysis => ProcessReadiness::Preview,
+            self::TaxNoticeReview => ProcessReadiness::Unavailable,
             self::InvestigationSynthesis => ProcessReadiness::Available,
         };
     }

@@ -10,28 +10,12 @@ class RexOrchestratorService
     /** @return array<int, string> */
     public function supportedRoutes(): array
     {
-        return [
-            'dashboard',
-            'analytics',
-            'alerts',
-            'suspicious',
-            'reconciliation',
-            'ar',
-            'vendors',
-            'cases',
-            'alert_recommendations',
-            'case_recommendations',
-            'controls',
-            'transactions',
-            'transaction_lookup',
-            'dashboard_health',
-            'controls_review',
-            'reconciliation_review',
-            'entity_graph_review',
-            'case_management',
-            'reporting',
-            'tax_notice_review',
-        ];
+        return array_keys($this->routeHandlers());
+    }
+
+    public function hasRouteHandler(string $route): bool
+    {
+        return array_key_exists($route, $this->routeHandlers());
     }
 
     public function handle(string $companyId, string $content, ?string $businessProfileId = null): ?array
@@ -46,28 +30,37 @@ class RexOrchestratorService
 
     public function handleRoute(string $companyId, string $route, ?string $businessProfileId = null): ?array
     {
-        return match ($route) {
-            'dashboard' => $this->dashboard($companyId, $businessProfileId),
-            'analytics' => $this->analytics($companyId, $businessProfileId),
-            'alerts' => $this->alerts($companyId, $businessProfileId),
-            'suspicious' => $this->suspicious($companyId, $businessProfileId),
-            'reconciliation' => $this->reconciliation($companyId),
-            'ar' => $this->arAging($companyId),
-            'vendors' => $this->vendors($companyId, $businessProfileId),
-            'cases' => $this->cases($companyId, $businessProfileId),
-            'alert_recommendations' => $this->alertRecommendations($companyId, $businessProfileId),
-            'case_recommendations' => $this->caseRecommendations($companyId, $businessProfileId),
-            'controls' => $this->controls($companyId),
-            'transactions' => $this->transactions($companyId, $businessProfileId),
-            'transaction_lookup' => $this->transactions($companyId, $businessProfileId),
-            'dashboard_health' => $this->dashboardHealth($companyId, $businessProfileId),
-            'controls_review' => $this->controls($companyId),
-            'reconciliation_review' => $this->reconciliation($companyId),
-            'entity_graph_review' => $this->entityGraph($companyId),
-            'case_management' => $this->cases($companyId, $businessProfileId),
-            'reporting' => $this->reporting($companyId),
-            default => null,
-        };
+        $handler = $this->routeHandlers()[$route] ?? null;
+
+        return $handler ? $handler($companyId, $businessProfileId) : null;
+    }
+
+    /**
+     * @return array<string, \Closure(string, ?string): array<string, mixed>>
+     */
+    private function routeHandlers(): array
+    {
+        return [
+            'dashboard' => fn (string $companyId, ?string $businessProfileId): array => $this->dashboard($companyId, $businessProfileId),
+            'analytics' => fn (string $companyId, ?string $businessProfileId): array => $this->analytics($companyId, $businessProfileId),
+            'alerts' => fn (string $companyId, ?string $businessProfileId): array => $this->alerts($companyId, $businessProfileId),
+            'suspicious' => fn (string $companyId, ?string $businessProfileId): array => $this->suspicious($companyId, $businessProfileId),
+            'reconciliation' => fn (string $companyId, ?string $businessProfileId): array => $this->reconciliation($companyId),
+            'ar' => fn (string $companyId, ?string $businessProfileId): array => $this->arAging($companyId),
+            'vendors' => fn (string $companyId, ?string $businessProfileId): array => $this->vendors($companyId, $businessProfileId),
+            'cases' => fn (string $companyId, ?string $businessProfileId): array => $this->cases($companyId, $businessProfileId),
+            'alert_recommendations' => fn (string $companyId, ?string $businessProfileId): array => $this->alertRecommendations($companyId, $businessProfileId),
+            'case_recommendations' => fn (string $companyId, ?string $businessProfileId): array => $this->caseRecommendations($companyId, $businessProfileId),
+            'controls' => fn (string $companyId, ?string $businessProfileId): array => $this->controls($companyId),
+            'transactions' => fn (string $companyId, ?string $businessProfileId): array => $this->transactions($companyId, $businessProfileId),
+            'transaction_lookup' => fn (string $companyId, ?string $businessProfileId): array => $this->transactions($companyId, $businessProfileId),
+            'dashboard_health' => fn (string $companyId, ?string $businessProfileId): array => $this->dashboardHealth($companyId, $businessProfileId),
+            'controls_review' => fn (string $companyId, ?string $businessProfileId): array => $this->controls($companyId),
+            'reconciliation_review' => fn (string $companyId, ?string $businessProfileId): array => $this->reconciliation($companyId),
+            'entity_graph_review' => fn (string $companyId, ?string $businessProfileId): array => $this->entityGraph($companyId),
+            'case_management' => fn (string $companyId, ?string $businessProfileId): array => $this->cases($companyId, $businessProfileId),
+            'reporting' => fn (string $companyId, ?string $businessProfileId): array => $this->reporting($companyId),
+        ];
     }
 
     private function dashboard(string $companyId, ?string $businessProfileId): array

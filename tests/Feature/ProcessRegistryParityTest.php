@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ProcessReadiness;
 use App\Enums\RexProcess;
 use App\Services\Agents\AgentActionExecutorService;
 use App\Services\Agents\AgentToolRegistry;
 use App\Services\Agents\BrevixAgentRunner;
+use App\Services\RexOrchestratorService;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -75,21 +77,51 @@ class ProcessRegistryParityTest extends TestCase
     }
 
     /**
-     * Every orchestrator-mode process must appear in the orchestrator's supported routes.
+     * Every ready orchestrator-mode process must appear in the orchestrator's supported routes.
      */
     public function test_orchestrator_processes_are_in_supported_routes(): void
     {
-        $orchestrator = app(\App\Services\RexOrchestratorService::class);
+        $orchestrator = app(RexOrchestratorService::class);
         $supported = $orchestrator->supportedRoutes();
 
         foreach (RexProcess::cases() as $process) {
-            if ($process->mode() !== 'orchestrator') {
+            if ($process->mode() !== 'orchestrator' || $process->readiness() === ProcessReadiness::Unavailable) {
                 continue;
             }
             $this->assertContains(
                 $process->value,
                 $supported,
                 "Orchestrator-mode process '{$process->value}' is not in RexOrchestratorService::supportedRoutes()."
+            );
+        }
+    }
+
+    public function test_supported_orchestrator_routes_have_handlers(): void
+    {
+        $orchestrator = app(RexOrchestratorService::class);
+
+        foreach ($orchestrator->supportedRoutes() as $route) {
+            $this->assertTrue(
+                $orchestrator->hasRouteHandler($route),
+                "Supported Rex route '{$route}' must have a RexOrchestratorService handler."
+            );
+        }
+    }
+
+    public function test_unavailable_orchestrator_processes_are_not_supported_routes(): void
+    {
+        $orchestrator = app(RexOrchestratorService::class);
+        $supported = $orchestrator->supportedRoutes();
+
+        foreach (RexProcess::cases() as $process) {
+            if ($process->mode() !== 'orchestrator' || $process->readiness() !== ProcessReadiness::Unavailable) {
+                continue;
+            }
+
+            $this->assertNotContains(
+                $process->value,
+                $supported,
+                "Unavailable Rex process '{$process->value}' must not be advertised as a supported route."
             );
         }
     }
