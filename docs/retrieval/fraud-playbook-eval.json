@@ -1,0 +1,80 @@
+{
+    "scenarios": [
+        {
+            "query": "duplicate invoice split payment",
+            "expected_top_title": "Duplicate invoice and split payment review",
+            "min_confidence": "high",
+            "must_not_match_titles": ["Ghost employee payroll review"]
+        },
+        {
+            "query": "invoice paid twice",
+            "expected_top_title": "Duplicate invoice and split payment review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "ghost employee",
+            "expected_top_title": "Ghost employee payroll review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "employee on payroll I don't recognize",
+            "expected_top_title": "Ghost employee payroll review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "my bookkeeper quit suddenly",
+            "expected_top_title": "Bookkeeper transition and segregation of duties review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "payroll spiked this month",
+            "expected_top_title": "Payroll spike and off-cycle payment review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "IRS notice payroll taxes",
+            "expected_top_title": "IRS notice and payroll tax diversion review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "one vendor gets most of our money",
+            "expected_top_title": "Vendor concentration and kickback indicators review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "same bank account employee vendor",
+            "expected_top_title": "Related party supplier review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "vendor emailed asking to change bank details",
+            "expected_top_title": "Payment redirection and vendor email compromise review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "cash missing from the register",
+            "expected_top_title": "Cash skimming and unrecorded sales review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "refunds are way up but returns aren't",
+            "expected_top_title": "Refund and credit memo abuse review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "personal charges on the company card",
+            "expected_top_title": "Company card misuse review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "payments just under our approval limit",
+            "expected_top_title": "Approval threshold evasion and round-dollar review",
+            "min_confidence": "medium"
+        },
+        {
+            "query": "paying a vendor no one remembers hiring",
+            "expected_top_title": "Shell vendor and fictitious billing review",
+            "min_confidence": "medium"
+        }
+    ]
+}

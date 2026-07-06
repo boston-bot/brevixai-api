@@ -101,8 +101,8 @@ class FraudPlaybookRetrievalTest extends TestCase
 
         $response->assertJsonPath('status', 'ok')
             ->assertJsonPath('corpus_id', 'fraud_playbooks')
-            ->assertJsonPath('corpus_version', 'fraud_playbooks:v1')
-            ->assertJsonPath('scoring.strategy', 'lexical_playbook_v1')
+            ->assertJsonPath('corpus_version', 'fraud_playbooks:v2')
+            ->assertJsonPath('scoring.strategy', 'lexical_playbook_v2')
             ->assertJsonPath('scoring.hybrid', false)
             ->assertJsonPath('results.0.title', 'Duplicate invoice and split payment review')
             ->assertJsonPath('results.0.confidence', 'high')

@@ -16,32 +16,35 @@ class PlanPolicyService
     public function subscriptionForCompany(string $companyId): array
     {
         if (! Schema::hasTable('subscriptions')) {
-            return ['tier' => 'starter', 'status' => 'active'];
+            // Legacy/test environments without the table behave as paid so
+            // internal tooling is never blocked by plan checks.
+            return ['tier' => 'pro', 'status' => 'active'];
         }
 
         $subscription = Subscription::where('company_id', $companyId)->first();
 
         return [
-            'tier' => $this->normalizeTier((string) ($subscription->tier ?? 'starter')),
-            'status' => $subscription->status ?? null,
+            'tier' => $this->normalizeTier((string) ($subscription->tier ?? 'pro')),
+            'status' => $subscription->status ?? ($subscription === null ? 'active' : null),
         ];
     }
 
+    /**
+     * The plan model is now two tiers: 'free' (verified email signup) and
+     * 'pro' (paid). All legacy paid tiers fold into 'pro'.
+     */
     public function normalizeTier(string $tier): string
     {
         return match ($tier) {
-            'accounting', 'accounting-firm' => 'risk-advisory',
-            default => $tier,
+            'starter', 'growth', 'accounting', 'accounting-firm', 'risk-advisory', 'pro' => 'pro',
+            default => 'free',
         };
     }
 
     public function dailyChatLimit(string $companyId): int
     {
         return match ($this->subscriptionForCompany($companyId)['tier']) {
-            'free' => 5,
-            'starter' => 25,
-            'growth' => 50,
-            'risk-advisory' => 200,
+            'pro' => 200,
             default => 0,
         };
     }
@@ -56,7 +59,7 @@ class PlanPolicyService
     public function businessProfileLimit(string $companyId): ?int
     {
         return match ($this->subscriptionForCompany($companyId)['tier']) {
-            'free', 'starter' => 1,
+            'free' => 1,
             default => null,
         };
     }

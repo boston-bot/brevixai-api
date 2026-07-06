@@ -2,6 +2,8 @@
 
 namespace App\Services\Retrieval;
 
+use App\Support\ProfessionalServicesDisclaimer;
+
 final readonly class RetrievalResponse
 {
     /**
@@ -40,6 +42,7 @@ final readonly class RetrievalResponse
             'results' => $results,
             'citations' => $this->uniqueCitations($results),
             'metadata' => $this->metadata,
+            'disclaimer' => ProfessionalServicesDisclaimer::TEXT,
         ];
     }
 

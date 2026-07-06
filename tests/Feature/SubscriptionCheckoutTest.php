@@ -53,12 +53,12 @@ class SubscriptionCheckoutTest extends TestCase
         });
     }
 
-    public function test_subscription_checkout_upgrades_the_company_tier(): void
+    public function test_subscription_checkout_upgrades_free_company_to_pro(): void
     {
         [$company, $user] = $this->createCompanyUser();
         Subscription::create([
             'company_id' => $company->id,
-            'tier' => 'starter',
+            'tier' => 'free',
             'status' => 'active',
         ]);
 
@@ -68,27 +68,40 @@ class SubscriptionCheckoutTest extends TestCase
 
         $this->getJson('/api/subscriptions')
             ->assertOk()
-            ->assertJsonPath('tier', 'starter')
+            ->assertJsonPath('tier', 'free')
             ->assertJsonPath('status', 'active');
 
         $this->postJson('/api/subscriptions/checkout', [
-            'tier' => 'growth',
+            'tier' => 'pro',
             'paymentMethodId' => 'pm_card_visa',
         ])
             ->assertOk()
             ->assertJsonPath('status', 'succeeded')
-            ->assertJsonPath('tier', 'growth');
+            ->assertJsonPath('tier', 'pro');
 
         $this->assertDatabaseHas('subscriptions', [
             'company_id' => $company->id,
-            'tier' => 'growth',
+            'tier' => 'pro',
             'status' => 'active',
             'stripe_customer_id' => 'cus_test123',
             'stripe_subscription_id' => 'sub_test123',
         ]);
     }
 
-    public function test_subscription_checkout_normalizes_legacy_firm_tier_to_risk_advisory(): void
+    public function test_subscription_checkout_rejects_free_tier(): void
+    {
+        [, $user] = $this->createCompanyUser();
+        $this->mock(StripeService::class);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/subscriptions/checkout', [
+            'tier' => 'free',
+            'paymentMethodId' => 'pm_card_visa',
+        ])->assertStatus(422);
+    }
+
+    public function test_subscription_checkout_normalizes_legacy_tiers_to_pro(): void
     {
         [$company, $user] = $this->createCompanyUser();
 
@@ -101,21 +114,38 @@ class SubscriptionCheckoutTest extends TestCase
             'paymentMethodId' => 'pm_card_visa',
         ])
             ->assertOk()
-            ->assertJsonPath('tier', 'risk-advisory');
+            ->assertJsonPath('tier', 'pro');
 
         $this->assertDatabaseHas('subscriptions', [
             'company_id' => $company->id,
-            'tier' => 'risk-advisory',
+            'tier' => 'pro',
             'status' => 'active',
         ]);
     }
 
-    public function test_subscription_cancel_marks_subscription_canceled(): void
+    public function test_show_normalizes_legacy_tier_rows(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        $this->mock(StripeService::class);
+        Subscription::create([
+            'company_id' => $company->id,
+            'tier' => 'growth',
+            'status' => 'active',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/subscriptions')
+            ->assertOk()
+            ->assertJsonPath('tier', 'pro');
+    }
+
+    public function test_subscription_cancel_returns_company_to_free(): void
     {
         [$company, $user] = $this->createCompanyUser();
         Subscription::create([
             'company_id' => $company->id,
-            'tier' => 'growth',
+            'tier' => 'pro',
             'status' => 'active',
             'stripe_subscription_id' => 'sub_cancel123',
         ]);
@@ -130,11 +160,11 @@ class SubscriptionCheckoutTest extends TestCase
         $this->postJson('/api/subscriptions/cancel')
             ->assertOk()
             ->assertJsonPath('status', 'canceled')
-            ->assertJsonPath('tier', 'starter');
+            ->assertJsonPath('tier', 'free');
 
         $this->assertDatabaseHas('subscriptions', [
             'company_id' => $company->id,
-            'tier' => 'starter',
+            'tier' => 'free',
             'status' => 'canceled',
         ]);
     }
@@ -166,8 +196,7 @@ class SubscriptionCheckoutTest extends TestCase
 
     private function mockStripeCheckout(string $customerId, string $subscriptionId, string $status): void
     {
-        config(['services.stripe.price_ids.growth' => 'price_growth_test']);
-        config(['services.stripe.price_ids.risk-advisory' => 'price_risk_test']);
+        config(['services.stripe.price_ids.pro' => 'price_pro_test']);
 
         $fakeSub = \Stripe\Subscription::constructFrom([
             'id' => $subscriptionId,

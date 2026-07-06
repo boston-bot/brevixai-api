@@ -12,7 +12,7 @@ class Company extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'name', 'industry', 'size', 'website', 'entity_type', 'has_completed_onboarding',
+        'id', 'name', 'industry', 'size', 'website', 'entity_type', 'has_completed_onboarding',
     ];
 
     protected $casts = [
