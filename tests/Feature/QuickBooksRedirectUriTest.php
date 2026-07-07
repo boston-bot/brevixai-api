@@ -171,6 +171,34 @@ class QuickBooksRedirectUriTest extends TestCase
         Queue::assertPushed(SyncQuickBooksCompanyJob::class);
     }
 
+    public function test_qbo_callback_redirects_to_settings_with_error_notice_on_failure(): void
+    {
+        Queue::fake();
+
+        $this->mock(QboService::class, function ($mock): void {
+            $mock->shouldReceive('consumeOAuthStateNoncePayload')
+                ->once()
+                ->with('state-nonce')
+                ->andReturn([
+                    'company_id' => 'company-1',
+                    'business_profile_id' => 'profile-1',
+                ]);
+
+            $mock->shouldReceive('redirectUri')
+                ->once()
+                ->andReturn('http://localhost:8081/callback');
+
+            $mock->shouldReceive('exchangeTokens')
+                ->once()
+                ->andThrow(new \Exception('token exchange failed'));
+        });
+
+        $this->get('/api/integrations/qbo/callback?state=state-nonce&realmId=realm-1&code=auth-code')
+            ->assertRedirect('http://localhost:8081/settings?quickbooks=error');
+
+        Queue::assertNothingPushed();
+    }
+
     /**
      * @return array{0: Company, 1: User}
      */

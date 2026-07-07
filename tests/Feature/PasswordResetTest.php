@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\PasswordReset;
 use App\Models\User;
+use App\Notifications\ResetPasswordLink;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -94,6 +96,69 @@ class PasswordResetTest extends TestCase
         $this->postJson('/api/auth/forgot-password', ['email' => $user->email])->assertOk();
 
         $this->assertSame(1, PasswordReset::where('user_id', $user->id)->count());
+    }
+
+    public function test_forgot_password_emails_reset_link_whose_token_matches_stored_hash(): void
+    {
+        Notification::fake();
+        config(['app.frontend_url' => 'http://frontend.test']);
+
+        $user = $this->createUser();
+
+        $this->postJson('/api/auth/forgot-password', ['email' => $user->email])->assertOk();
+
+        Notification::assertSentTo($user, ResetPasswordLink::class, function (ResetPasswordLink $notification) use ($user): bool {
+            $record = PasswordReset::where('user_id', $user->id)->firstOrFail();
+
+            // The plain token is emailed; only its hash is stored, and the
+            // reset endpoint looks records up by that hash.
+            $this->assertSame(hash('sha256', $notification->token), $record->token);
+            $this->assertSame(
+                'http://frontend.test/reset-password?token='.$notification->token.'&email='.urlencode($user->email),
+                $notification->resetUrl($user),
+            );
+
+            return true;
+        });
+    }
+
+    public function test_forgot_password_does_not_notify_unknown_email_and_responses_are_identical(): void
+    {
+        Notification::fake();
+
+        $user = $this->createUser();
+
+        $knownResponse = $this->postJson('/api/auth/forgot-password', ['email' => $user->email])->assertOk();
+        $unknownResponse = $this->postJson('/api/auth/forgot-password', ['email' => 'nobody@example.com'])->assertOk();
+
+        $this->assertSame($knownResponse->getContent(), $unknownResponse->getContent());
+        $this->assertSame($knownResponse->getStatusCode(), $unknownResponse->getStatusCode());
+
+        Notification::assertSentToTimes($user, ResetPasswordLink::class, 1);
+        Notification::assertCount(1);
+    }
+
+    public function test_emailed_token_resets_the_password(): void
+    {
+        Notification::fake();
+
+        $user = $this->createUser('old-password-123');
+
+        $this->postJson('/api/auth/forgot-password', ['email' => $user->email])->assertOk();
+
+        $emailedToken = null;
+        Notification::assertSentTo($user, ResetPasswordLink::class, function (ResetPasswordLink $notification) use (&$emailedToken): bool {
+            $emailedToken = $notification->token;
+
+            return true;
+        });
+
+        $this->postJson('/api/auth/reset-password', [
+            'token' => $emailedToken,
+            'password' => 'new-password-456',
+        ])->assertOk();
+
+        $this->assertTrue(Hash::check('new-password-456', $user->refresh()->password_hash));
     }
 
     public function test_forgot_password_requires_valid_email(): void
