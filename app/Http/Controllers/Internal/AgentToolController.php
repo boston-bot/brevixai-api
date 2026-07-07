@@ -381,6 +381,7 @@ class AgentToolController extends Controller
             $executableTypes = $executorService->supportedActionTypes();
 
             $actionTypes = [
+                ['type' => 'create_investigation', 'requires_approval' => true,  'executable' => in_array('create_investigation', $executableTypes), 'display_name' => 'Create Investigation'],
                 ['type' => 'create_alert',    'requires_approval' => true,  'executable' => in_array('create_alert', $executableTypes),    'display_name' => 'Create Alert'],
                 ['type' => 'draft_case',       'requires_approval' => true,  'executable' => in_array('draft_case', $executableTypes),       'display_name' => 'Draft Case'],
                 ['type' => 'send_email',       'requires_approval' => true,  'executable' => in_array('send_email', $executableTypes),       'display_name' => 'Send Email'],

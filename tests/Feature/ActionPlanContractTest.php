@@ -22,6 +22,7 @@ class ActionPlanContractTest extends TestCase
         parent::setUp();
 
         foreach ([
+            'findings',
             'alerts',
             'qbo_transactions',
             'gnucash_imports',
@@ -120,6 +121,47 @@ class ActionPlanContractTest extends TestCase
             ->assertOk()
             ->assertJsonPath('openFindings.count', 1)
             ->assertJsonPath('openFindings.items.0.title', 'High risk alert');
+    }
+
+    public function test_action_plan_prefers_canonical_findings_when_available(): void
+    {
+        [$company, $user, $profile] = $this->createWorkspace();
+        $this->createFindingsTable();
+        Sanctum::actingAs($user);
+
+        DB::table('alerts')->insert([
+            'id' => (string) Str::uuid(),
+            'company_id' => $company->id,
+            'business_profile_id' => $profile->id,
+            'title' => 'Legacy alert',
+            'severity' => 'critical',
+            'status' => 'open',
+            'created_at' => now(),
+        ]);
+
+        DB::table('findings')->insert([
+            'id' => (string) Str::uuid(),
+            'company_id' => $company->id,
+            'business_profile_id' => $profile->id,
+            'title' => 'Canonical finding',
+            'summary' => 'Finding summary',
+            'detail' => 'Finding detail',
+            'severity' => 'warning',
+            'status' => 'new',
+            'category' => 'reconciliation',
+            'source_module' => 'reconciliation',
+            'source_record_type' => 'rule',
+            'source_record_id' => 'recon-1',
+            'evidence_refs' => json_encode([]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/action-plan', ['X-Brevix-Business-Profile-Id' => $profile->id])
+            ->assertOk()
+            ->assertJsonPath('openFindings.count', 1)
+            ->assertJsonPath('openFindings.items.0.title', 'Canonical finding')
+            ->assertJsonPath('openFindings.items.0.sourceSystem', 'reconciliation');
     }
 
     private function createSchema(): void
@@ -252,6 +294,28 @@ class ActionPlanContractTest extends TestCase
             $table->string('severity')->default('info');
             $table->string('status')->default('open');
             $table->timestamp('created_at')->nullable();
+        });
+    }
+
+    private function createFindingsTable(): void
+    {
+        Schema::create('findings', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->uuid('investigation_id')->nullable();
+            $table->string('category')->default('unsure');
+            $table->string('source_module');
+            $table->string('source_record_type');
+            $table->string('source_record_id');
+            $table->string('title');
+            $table->text('summary')->nullable();
+            $table->text('detail')->nullable();
+            $table->string('severity')->default('warning');
+            $table->string('status')->default('new');
+            $table->string('reason_code')->nullable();
+            $table->json('evidence_refs')->nullable();
+            $table->timestamps();
         });
     }
 

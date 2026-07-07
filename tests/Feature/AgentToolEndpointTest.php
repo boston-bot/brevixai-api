@@ -83,17 +83,17 @@ class AgentToolEndpointTest extends TestCase
         $this->assertNotEmpty($types);
     }
 
-    public function test_process_registry_includes_create_alert_as_executable(): void
+    public function test_process_registry_includes_create_investigation_as_executable(): void
     {
         $response = $this->withToken('test-tool-key')
             ->getJson('/api/internal/agent-tools/process-registry')
             ->assertOk();
 
-        $createAlert = collect($response->json('action_types'))->firstWhere('type', 'create_alert');
+        $createInvestigation = collect($response->json('action_types'))->firstWhere('type', 'create_investigation');
 
-        $this->assertNotNull($createAlert, "'create_alert' must appear in process registry action_types");
-        $this->assertTrue($createAlert['requires_approval']);
-        $this->assertTrue($createAlert['executable']);
+        $this->assertNotNull($createInvestigation, "'create_investigation' must appear in process registry action_types");
+        $this->assertTrue($createInvestigation['requires_approval']);
+        $this->assertTrue($createInvestigation['executable']);
     }
 
     public function test_process_registry_non_executable_types_have_executable_false(): void

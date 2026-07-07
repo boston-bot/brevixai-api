@@ -372,6 +372,17 @@ class EvidenceRequirementService
         $matches = $this->matchingSources($template, $session, $sources);
         $status = $this->statusFromMatches($matches);
         $primarySource = $matches[0] ?? null;
+        $override = $this->evidenceOverride($session, (string) $template['requirementKey']);
+        if ($override && $this->shouldApplyOverride($status, (string) ($override['status'] ?? 'missing'))) {
+            $status = (string) $override['status'];
+            $primarySource = [
+                'sourceType' => $override['sourceType'] ?? 'manual_update',
+                'sourceId' => $override['sourceId'] ?? null,
+                'label' => $override['label'] ?? 'Manual evidence update',
+                'statusCategory' => $this->statusCategory($status),
+            ];
+            array_unshift($matches, $primarySource);
+        }
 
         return [
             'id' => (string) $template['requirementKey'],
@@ -386,6 +397,34 @@ class EvidenceRequirementService
             'acceptedSourceTypes' => $template['acceptedSourceTypes'] ?? [],
             'satisfiedBy' => $matches,
         ];
+    }
+
+    private function evidenceOverride(OnboardingSession $session, string $requirementKey): ?array
+    {
+        $metadata = $session->metadata ?: [];
+        $items = is_array($metadata['evidenceItems'] ?? null) ? $metadata['evidenceItems'] : [];
+        $override = $items[$requirementKey] ?? null;
+
+        return is_array($override) ? $override : null;
+    }
+
+    private function shouldApplyOverride(string $computedStatus, string $overrideStatus): bool
+    {
+        if (! in_array($overrideStatus, ['received', 'processing', 'validated', 'failed', 'waived'], true)) {
+            return false;
+        }
+
+        return ! in_array($computedStatus, ['received', 'validated'], true)
+            || in_array($overrideStatus, ['received', 'validated', 'failed', 'waived'], true);
+    }
+
+    private function statusCategory(string $status): string
+    {
+        return match ($status) {
+            'processing' => 'processing',
+            'failed' => 'failed',
+            default => in_array($status, ['received', 'validated', 'waived'], true) ? 'received' : 'missing',
+        };
     }
 
     /**
