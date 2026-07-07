@@ -27,6 +27,7 @@ class ProcessRegistryTest extends TestCase
         $p = RexProcess::RiskReview;
         $this->assertSame('agent', $p->mode());
         $this->assertSame(ProcessReadiness::Available, $p->readiness());
+        $this->assertContains('create_investigation', $p->approvalTypes());
         $this->assertContains('create_alert', $p->approvalTypes());
     }
 
@@ -93,6 +94,7 @@ class ProcessRegistryTest extends TestCase
         $p = RexProcess::RecommendationReview;
         $this->assertSame('agent', $p->mode());
         $this->assertSame(ProcessReadiness::Available, $p->readiness());
+        $this->assertContains('create_investigation', $p->approvalTypes());
         $this->assertContains('create_alert', $p->approvalTypes());
     }
 

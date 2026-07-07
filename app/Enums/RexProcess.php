@@ -108,10 +108,10 @@ enum RexProcess: string
     public function approvalTypes(): array
     {
         return match ($this) {
-            self::RiskReview         => ['create_alert', 'create_case', 'flag_transaction'],
-            self::RecommendationReview => ['create_alert', 'create_case'],
-            self::InvestigationSynthesis => ['create_alert', 'create_case', 'escalate_review'],
-            self::BehavioralAnalysis => ['create_alert', 'flag_transaction'],
+            self::RiskReview         => ['create_investigation', 'create_alert', 'create_case', 'flag_transaction'],
+            self::RecommendationReview => ['create_investigation', 'create_alert', 'create_case'],
+            self::InvestigationSynthesis => ['create_investigation', 'create_alert', 'create_case', 'escalate_review'],
+            self::BehavioralAnalysis => ['create_investigation', 'create_alert', 'flag_transaction'],
             self::TransactionLookup,
             self::DashboardHealth,
             self::ControlsReview,

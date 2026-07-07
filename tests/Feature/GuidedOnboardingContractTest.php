@@ -110,10 +110,27 @@ class GuidedOnboardingContractTest extends TestCase
             ->assertOk()
             ->assertJsonPath('session.businessContext.industryOrActivity', 'Software Development');
 
-        // Test PATCH /api/onboarding/evidence-items/{id}
-        $this->patchJson('/api/onboarding/evidence-items/bank_statements', [], ['X-Brevix-Business-Profile-Id' => $profile->id])
+        $this->postJson('/api/onboarding/answers', [
+            'step' => 'intent',
+            'answers' => [
+                'primaryIntent' => 'routine_books_review',
+                'concernSummary' => 'Owner wants a first-pass review.',
+            ],
+        ], ['X-Brevix-Business-Profile-Id' => $profile->id])
             ->assertOk()
-            ->assertJsonPath('status', 'acknowledged');
+            ->assertJsonPath('session.primaryIntent', 'routine_books_review')
+            ->assertJsonPath('session.currentStep', 'business_context')
+            ->assertJsonPath('session.businessContext.statedConcernSummary', 'Owner wants a first-pass review.');
+
+        // Test PATCH /api/onboarding/evidence-items/{id}
+        $this->patchJson('/api/onboarding/evidence-items/bank_statements', [
+            'status' => 'processing',
+            'sourceType' => 'file_upload',
+            'sourceId' => 'upload-1',
+        ], ['X-Brevix-Business-Profile-Id' => $profile->id])
+            ->assertOk()
+            ->assertJsonPath('status', 'processing')
+            ->assertJsonPath('evidenceItem.sourceId', 'upload-1');
 
         // Test POST /api/onboarding/complete
         $this->postJson('/api/onboarding/complete', [], ['X-Brevix-Business-Profile-Id' => $profile->id])

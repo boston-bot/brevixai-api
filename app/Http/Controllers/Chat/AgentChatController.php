@@ -80,6 +80,7 @@ class AgentChatController extends Controller
                 'intent' => 'agent_service_unavailable',
                 'findings' => [],
                 'recommended_actions' => [],
+                'can_create_investigation' => false,
                 'can_create_alert' => false,
                 'requires_review' => false,
                 'trace_id' => $e instanceof BrevixAgentRunFailed ? $e->agentRunId() : null,
@@ -118,6 +119,7 @@ class AgentChatController extends Controller
                     'traceId' => $result['trace_id'],
                     'intent' => $result['intent'] ?? null,
                     'requiresReview' => (bool) ($result['requires_review'] ?? false),
+                    'canCreateInvestigation' => (bool) ($result['can_create_investigation'] ?? false),
                     'canCreateAlert' => (bool) ($result['can_create_alert'] ?? false),
                     'artifactCount' => count($result['findings'] ?? []),
                     'actionCount' => count($result['recommended_actions'] ?? []),
@@ -153,6 +155,7 @@ class AgentChatController extends Controller
             'intent' => $result['intent'],
             'findings' => $result['findings'],
             'recommended_actions' => $result['recommended_actions'],
+            'can_create_investigation' => (bool) ($result['can_create_investigation'] ?? false),
             'can_create_alert' => $result['can_create_alert'],
             'requires_review' => $result['requires_review'],
             'trace_id' => $result['trace_id'],
@@ -172,7 +175,7 @@ class AgentChatController extends Controller
 
     private function agentUnavailableMessage(): string
     {
-        return 'I could not complete the risk review right now. No alerts or cases were created. Please try again or review the dashboard manually.';
+        return 'I could not complete the risk review right now. No investigations were created. Please try again or review the dashboard manually.';
     }
 
     private function emitSse(string $type, array $payload): void

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\BusinessProfileAccessException;
 use App\Http\Controllers\Controller;
+use App\Models\OnboardingSession;
 use App\Services\BusinessProfileContext;
 use App\Services\BusinessProfileContextService;
 use App\Services\DataSourceRegistryService;
@@ -35,9 +36,7 @@ class OnboardingController extends Controller
             $this->dataSources->forContext($context->companyId, $context->businessProfileId),
         );
 
-        return response()->json([
-            'session' => $this->sessions->contract($session, $requirementsPayload['readiness']),
-        ]);
+        return response()->json($this->sessionPayload($session, $requirementsPayload, $context));
     }
 
     public function updateSession(Request $request): JsonResponse
@@ -87,9 +86,7 @@ class OnboardingController extends Controller
             $this->dataSources->forContext($context->companyId, $context->businessProfileId),
         );
 
-        return response()->json([
-            'session' => $this->sessions->contract($session, $requirementsPayload['readiness']),
-        ]);
+        return response()->json($this->sessionPayload($session, $requirementsPayload, $context));
     }
 
     public function evidenceRequirements(Request $request): JsonResponse
@@ -110,25 +107,84 @@ class OnboardingController extends Controller
 
     public function storeAnswer(Request $request): JsonResponse
     {
-        // Simple proxy to updateSession for businessContext
         $payload = $request->validate([
-            'answerKey' => ['required', 'string'],
-            'answerValue' => ['required'],
+            'answerKey' => ['sometimes', 'required_without:answers', 'string'],
+            'answerValue' => ['sometimes', 'required_with:answerKey'],
+            'step' => ['sometimes', 'string', 'max:100'],
+            'answers' => ['sometimes', 'array'],
+            'answers.primaryIntent' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'answers.concernSummary' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'answers.businessContext' => ['sometimes', 'array'],
         ]);
 
-        $request->merge([
-            'businessContext' => [
-                $payload['answerKey'] => $payload['answerValue']
-            ]
-        ]);
+        $patch = [];
+        if (array_key_exists('answerKey', $payload)) {
+            $patch['businessContext'] = [
+                $payload['answerKey'] => $payload['answerValue'] ?? null,
+            ];
+        }
+
+        $answers = $payload['answers'] ?? [];
+        if (is_array($answers)) {
+            if (array_key_exists('primaryIntent', $answers)) {
+                $patch['primaryIntent'] = $answers['primaryIntent'];
+            }
+
+            $businessContext = [];
+            if (isset($answers['businessContext']) && is_array($answers['businessContext'])) {
+                $businessContext = $answers['businessContext'];
+            }
+            if (array_key_exists('concernSummary', $answers)) {
+                $businessContext['statedConcernSummary'] = $answers['concernSummary'];
+            }
+            if ($businessContext !== []) {
+                $patch['businessContext'] = array_merge($patch['businessContext'] ?? [], $businessContext);
+            }
+        }
+
+        $step = $payload['step'] ?? null;
+        if ($step === 'intent') {
+            $patch['currentStep'] = OnboardingSessionService::STEP_BUSINESS_CONTEXT;
+        } elseif ($step === 'context') {
+            $patch['currentStep'] = OnboardingSessionService::STEP_EVIDENCE_CHECKLIST;
+        }
+
+        $request->merge($patch);
 
         return $this->updateSession($request);
     }
 
     public function updateEvidenceItem(Request $request, string $id): JsonResponse
     {
-        // Future: Handle individual evidence item status updates if not driven by uploads
-        return response()->json(['status' => 'acknowledged', 'id' => $id]);
+        $context = $this->resolveContext($request);
+        if ($context instanceof JsonResponse) {
+            return $context;
+        }
+
+        $payload = $request->validate([
+            'status' => ['sometimes', 'string', Rule::in($this->sessions->allowedEvidenceStatuses())],
+            'sourceType' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'sourceId' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]);
+
+        $session = $this->sessions->getOrCreate($context, $request->user());
+        $session = $this->sessions->updateEvidenceItem($session, $id, $payload, $request->user());
+        $requirementsPayload = $this->evidenceRequirements->requirementsForSession(
+            $session,
+            $this->dataSources->forContext($context->companyId, $context->businessProfileId),
+        );
+
+        return response()->json(array_merge($this->sessionPayload($session, $requirementsPayload, $context), [
+            'status' => $payload['status'] ?? 'received',
+            'id' => $id,
+            'evidenceItem' => [
+                'id' => $id,
+                'requirementKey' => $id,
+                'status' => $payload['status'] ?? 'received',
+                'sourceType' => $payload['sourceType'] ?? null,
+                'sourceId' => $payload['sourceId'] ?? null,
+            ],
+        ]));
     }
 
     public function complete(Request $request): JsonResponse
@@ -144,5 +200,17 @@ class OnboardingController extends Controller
         } catch (BusinessProfileAccessException $e) {
             return response()->json(['error' => $e->getMessage()], $e->statusCode());
         }
+    }
+
+    private function sessionPayload(OnboardingSession $session, array $requirementsPayload, BusinessProfileContext $context): array
+    {
+        $dataSources = $this->dataSources->forContext($context->companyId, $context->businessProfileId);
+
+        return [
+            'session' => $this->sessions->contract($session, $requirementsPayload['readiness']),
+            'evidenceRequirements' => $requirementsPayload['requirements'],
+            'dataReadiness' => $requirementsPayload['readiness'],
+            'dataSources' => $dataSources['sources'] ?? [],
+        ];
     }
 }

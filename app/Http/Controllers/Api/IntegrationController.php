@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\BusinessProfileAccessException;
 use App\Http\Controllers\Controller;
+use App\Jobs\SyncQuickBooksCompanyJob;
 use App\Services\BusinessProfileContextService;
 use App\Services\QboService;
 use Exception;
@@ -58,6 +59,7 @@ class IntegrationController extends Controller
 
         try {
             $this->qboService->exchangeTokens($companyId, $realmId, $code, $this->qboService->redirectUri(), $businessProfileId);
+            SyncQuickBooksCompanyJob::dispatch($companyId, $realmId, $businessProfileId);
             
             // Redirect back to frontend with a first-run notice trigger.
             return redirect(config('app.frontend_url', config('app.url')) . '/settings?quickbooks=connected');

@@ -6,6 +6,7 @@ use App\Models\AgentActionApproval;
 use App\Models\Alert;
 use App\Models\AuditCase;
 use App\Models\Company;
+use App\Models\Investigation;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\NotificationService;
@@ -19,13 +20,14 @@ class AgentActionExecutorService
     /** @return list<string> */
     public function supportedActionTypes(): array
     {
-        return ['create_alert', 'create_case', 'flag_transaction', 'escalate_review'];
+        return ['create_investigation', 'create_alert', 'create_case', 'flag_transaction', 'escalate_review'];
     }
 
     /** @throws \InvalidArgumentException|\RuntimeException */
     public function execute(AgentActionApproval $approval, User $approver): AgentActionExecutionResult
     {
         return match ($approval->action_type) {
+            'create_investigation' => $this->createInvestigation($approval, $approver),
             'create_alert'      => $this->createAlert($approval, $approver),
             'create_case'       => $this->createCase($approval, $approver),
             'flag_transaction'  => $this->flagTransaction($approval, $approver),
@@ -34,6 +36,81 @@ class AgentActionExecutorService
                 "Unsupported action type: {$approval->action_type}"
             ),
         };
+    }
+
+    private function createInvestigation(AgentActionApproval $approval, User $approver): AgentActionExecutionResult
+    {
+        if (! Schema::hasTable('investigations')) {
+            return $this->createCase($approval, $approver);
+        }
+
+        $payload = $approval->action_payload ?? [];
+
+        try {
+            $result = DB::transaction(function () use ($approval, $approver, $payload): AgentActionExecutionResult {
+                $attributes = [
+                    'company_id' => $approval->company_id,
+                    'title' => (string) ($payload['title'] ?? 'Agent-Recommended Investigation'),
+                    'category' => $this->canonicalInvestigationCategory((string) ($payload['category'] ?? $payload['type'] ?? 'unsure')),
+                    'status' => 'open',
+                    'priority' => $this->canonicalInvestigationPriority((string) ($payload['priority'] ?? $payload['severity'] ?? 'medium')),
+                    'scope_statement' => $payload['scopeStatement']
+                        ?? $payload['scope_statement']
+                        ?? $payload['summary']
+                        ?? $payload['description']
+                        ?? $payload['detail']
+                        ?? null,
+                    'scope_limitations' => is_array($payload['scopeLimitations'] ?? null)
+                        ? $payload['scopeLimitations']
+                        : (is_array($payload['scope_limitations'] ?? null) ? $payload['scope_limitations'] : []),
+                    'created_by' => $approver->id,
+                    'opened_at' => now(),
+                    'last_activity_at' => now(),
+                    'metadata' => [
+                        'source' => 'agent_action_approval',
+                        'approval_id' => (string) $approval->id,
+                        'agent_run_id' => (string) $approval->agent_run_id,
+                        'reason_codes' => is_array($payload['reason_codes'] ?? null) ? $payload['reason_codes'] : [],
+                        'evidence_refs' => is_array($payload['evidence_refs'] ?? null) ? $payload['evidence_refs'] : [],
+                    ],
+                ];
+                if ($approval->business_profile_id && Schema::hasColumn('investigations', 'business_profile_id')) {
+                    $attributes['business_profile_id'] = $approval->business_profile_id;
+                }
+
+                $investigation = Investigation::create($attributes);
+                $findingId = is_string($payload['finding_id'] ?? null) ? $payload['finding_id'] : null;
+                if ($findingId && Schema::hasTable('findings')) {
+                    $findingQuery = DB::table('findings')
+                        ->where('id', $findingId)
+                        ->where('company_id', $approval->company_id);
+                    if ($approval->business_profile_id && Schema::hasColumn('findings', 'business_profile_id')) {
+                        $findingQuery->where('business_profile_id', $approval->business_profile_id);
+                    }
+                    $findingQuery->update([
+                        'investigation_id' => $investigation->id,
+                        'status' => 'in_review',
+                        'updated_at' => now(),
+                    ]);
+                }
+
+                $approval->update([
+                    'status'      => 'approved',
+                    'approved_by' => $approver->id,
+                    'approved_at' => now(),
+                    'executed_at' => now(),
+                ]);
+
+                return new AgentActionExecutionResult('investigation', $investigation->id);
+            });
+
+            $this->logExecution($approval, $approver, $result, 'success');
+
+            return $result;
+        } catch (Throwable $e) {
+            $this->logFailure($approval, $e);
+            throw $e;
+        }
     }
 
     private function createAlert(AgentActionApproval $approval, User $approver): AgentActionExecutionResult
@@ -262,5 +339,41 @@ class AgentActionExecutorService
             'company_id'   => $approval->company_id,
             'error'        => $e->getMessage(),
         ]);
+    }
+
+    private function canonicalInvestigationPriority(string $priority): string
+    {
+        $priority = strtolower(trim($priority));
+
+        return match ($priority) {
+            'critical' => 'critical',
+            'high' => 'high',
+            'low', 'info' => 'low',
+            default => 'medium',
+        };
+    }
+
+    private function canonicalInvestigationCategory(string $category): string
+    {
+        $category = str_replace('-', '_', strtolower(trim($category)));
+
+        return match ($category) {
+            'vendor', 'vendor_risk', 'payments', 'vendor_payment' => 'vendor_payments',
+            'recon' => 'reconciliation',
+            'control', 'controls_review' => 'controls',
+            'tax_notice', 'irs' => 'tax',
+            default => in_array($category, [
+                'revenue',
+                'expense',
+                'payroll',
+                'tax',
+                'fraud',
+                'reconciliation',
+                'controls',
+                'vendor_payments',
+                'cash_flow',
+                'unsure',
+            ], true) ? $category : 'unsure',
+        };
     }
 }

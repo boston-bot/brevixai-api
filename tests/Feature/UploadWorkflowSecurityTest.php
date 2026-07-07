@@ -39,6 +39,7 @@ class UploadWorkflowSecurityTest extends TestCase
 
         $response->assertCreated();
         $uploadId = $response->json('uploadId');
+        $this->assertSame(['.csv'], $response->json('acceptedConstraints.acceptedExtensions'));
 
         $this->assertDatabaseHas('uploads', [
             'id' => $uploadId,
@@ -48,6 +49,46 @@ class UploadWorkflowSecurityTest extends TestCase
             'storage_filename' => "{$uploadId}.csv",
             'status_detail' => 'Upload session created.',
         ]);
+    }
+
+    public function test_upload_session_rejects_xlsx_until_parser_support_exists(): void
+    {
+        [, $user] = $this->createCompanyUser('Tenant A');
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/uploads', [
+            'importType' => 'transaction_ledger',
+            'originalFilename' => 'ledger.xlsx',
+            'claimedContentType' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'fileSizeBytes' => 1234,
+        ])->assertStatus(400)
+            ->assertJson([
+                'error' => 'Only .csv files are supported right now',
+            ]);
+    }
+
+    public function test_preview_returns_import_definition_and_sheet_totals(): void
+    {
+        [$company, $user] = $this->createCompanyUser('Tenant A');
+        $upload = $this->createUpload($company->id, $user->id, 'inspected');
+        $this->createInspection($company->id, $upload->id, [
+            [
+                'name' => 'Ledger',
+                'rowCount' => 2,
+                'headers' => ['Date', 'Vendor', 'Amount'],
+            ],
+        ], [
+            ['Date' => '2026-05-01', 'Vendor' => 'Acme', 'Amount' => '42.00'],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson("/api/uploads/{$upload->id}/preview")
+            ->assertOk()
+            ->assertJsonPath('importTypeDefinition.key', 'transaction_ledger')
+            ->assertJsonPath('inspection.totalRows', 2)
+            ->assertJsonPath('inspection.sheets.0.columns.0', 'Date')
+            ->assertJsonPath('inspection.sheets.0.preview.0.1', 'Acme');
     }
 
     public function test_upload_session_rejects_unsupported_import_type(): void
@@ -197,16 +238,16 @@ class UploadWorkflowSecurityTest extends TestCase
         return $upload;
     }
 
-    private function createInspection(string $companyId, string $uploadId): void
+    private function createInspection(string $companyId, string $uploadId, array $sheets = [], array $samplePreview = []): void
     {
         DB::table('upload_inspections')->insert([
             'id' => (string) Str::uuid(),
             'upload_id' => $uploadId,
             'company_id' => $companyId,
             'workbook_metadata' => json_encode(['detectedContentType' => 'text/csv']),
-            'sheet_inventory' => json_encode([]),
+            'sheet_inventory' => json_encode($sheets),
             'parser_warnings' => json_encode([]),
-            'sample_preview' => json_encode([]),
+            'sample_preview' => json_encode($samplePreview),
             'created_at' => now(),
         ]);
     }

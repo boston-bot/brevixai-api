@@ -65,6 +65,19 @@ class OnboardingSessionService
         ];
     }
 
+    /** @return list<string> */
+    public function allowedEvidenceStatuses(): array
+    {
+        return [
+            'missing',
+            'received',
+            'processing',
+            'validated',
+            'failed',
+            'waived',
+        ];
+    }
+
     public function getOrCreate(BusinessProfileContext $context, User $user): OnboardingSession
     {
         $query = OnboardingSession::where('company_id', $context->companyId)
@@ -152,6 +165,35 @@ class OnboardingSessionService
 
             return $session->refresh();
         });
+    }
+
+    /**
+     * @param array{status?: string, sourceType?: string|null, sourceId?: string|null} $payload
+     */
+    public function updateEvidenceItem(OnboardingSession $session, string $requirementKey, array $payload, User $user): OnboardingSession
+    {
+        $status = (string) ($payload['status'] ?? 'received');
+        if (! in_array($status, $this->allowedEvidenceStatuses(), true)) {
+            $status = 'received';
+        }
+
+        $metadata = $session->metadata ?: [];
+        $evidenceItems = is_array($metadata['evidenceItems'] ?? null) ? $metadata['evidenceItems'] : [];
+        $evidenceItems[$requirementKey] = [
+            'status' => $status,
+            'sourceType' => $payload['sourceType'] ?? null,
+            'sourceId' => $payload['sourceId'] ?? null,
+            'updatedBy' => (string) $user->id,
+            'updatedAt' => now()->toISOString(),
+        ];
+
+        $session->forceFill([
+            'metadata' => array_merge($metadata, [
+                'evidenceItems' => $evidenceItems,
+            ]),
+        ])->save();
+
+        return $session->refresh();
     }
 
     /**

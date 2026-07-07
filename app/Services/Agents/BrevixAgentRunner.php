@@ -20,7 +20,7 @@ class BrevixAgentRunner
     public const MAX_RESPONSE_SIZE = 8000;
 
     /** @var array<int, string> */
-    public const SUPPORTED_RECOMMENDED_ACTIONS = ['create_alert', 'create_case', 'flag_transaction', 'escalate_review'];
+    public const SUPPORTED_RECOMMENDED_ACTIONS = ['create_investigation', 'create_alert', 'create_case', 'flag_transaction', 'escalate_review'];
 
     public function __construct(private readonly BrevixAgentClient $agentClient) {}
 
@@ -130,6 +130,7 @@ class BrevixAgentRunner
                 'intent' => $intent,
                 'findings' => $this->arrayValue($agentResponse['findings'] ?? []),
                 'recommended_actions' => $actions,
+                'can_create_investigation' => collect($actions)->contains(fn (array $action): bool => ($action['type'] ?? null) === 'create_investigation'),
                 'can_create_alert' => collect($actions)->contains(fn (array $action): bool => ($action['type'] ?? null) === 'create_alert'),
                 'requires_review' => $requiresReview,
                 'trace_id' => $agentRun->id,
@@ -257,6 +258,7 @@ class BrevixAgentRunner
                 'intent' => $intent,
                 'findings' => $this->arrayValue($assembled['findings'] ?? []),
                 'recommended_actions' => $actions,
+                'can_create_investigation' => collect($actions)->contains(fn (array $action): bool => ($action['type'] ?? null) === 'create_investigation'),
                 'can_create_alert' => collect($actions)->contains(fn (array $action): bool => ($action['type'] ?? null) === 'create_alert'),
                 'requires_review' => $requiresReview,
                 'trace_id' => $agentRun->id,
