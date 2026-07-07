@@ -64,7 +64,10 @@ class IntegrationController extends Controller
             // Redirect back to frontend with a first-run notice trigger.
             return redirect(config('app.frontend_url', config('app.url')) . '/settings?quickbooks=connected');
         } catch (Exception $e) {
-            return response('Failed to complete QuickBooks authentication: ' . $e->getMessage(), 500);
+            report($e);
+
+            // Redirect back to frontend so the settings page can surface the failure.
+            return redirect(config('app.frontend_url', config('app.url')) . '/settings?quickbooks=error');
         }
     }
 
