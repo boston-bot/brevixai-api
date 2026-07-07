@@ -1,0 +1,15 @@
+{
+  "scenarios": [
+    {
+      "query": "duplicate invoice split payment",
+      "expected_top_title": "Duplicate invoice and split payment review",
+      "min_confidence": "medium",
+      "must_not_match_titles": ["Ghost employee payroll review"]
+    },
+    {
+      "query": "same bank account employee vendor",
+      "expected_top_title": "Related party supplier review",
+      "min_confidence": "medium"
+    }
+  ]
+}

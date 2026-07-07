@@ -36,7 +36,7 @@ class SubscriptionController extends Controller
         );
 
         return response()->json([
-            'tier' => $subscription->tier,
+            'tier' => $this->normalizeTier($subscription->tier),
             'status' => $subscription->status,
             'currentPeriodEnd' => $subscription->current_period_end,
         ]);
@@ -57,14 +57,14 @@ class SubscriptionController extends Controller
         }
 
         $validated = $request->validate([
-            'tier' => ['required', 'string', Rule::in(['free', 'starter', 'growth', 'risk-advisory', 'accounting', 'accounting-firm'])],
+            'tier' => ['required', 'string', Rule::in(['free', 'pro', 'starter', 'growth', 'risk-advisory', 'accounting', 'accounting-firm'])],
             'paymentMethodId' => ['required', 'string'],
         ]);
 
         $tier = $this->normalizeTier($validated['tier']);
 
-        if (in_array($tier, ['free', 'starter'], true)) {
-            return response()->json(['error' => "No payment required for the {$tier} tier"], 422);
+        if ($tier === 'free') {
+            return response()->json(['error' => 'No payment required for the free tier'], 422);
         }
 
         $priceId = config("services.stripe.price_ids.{$tier}");
@@ -151,7 +151,7 @@ class SubscriptionController extends Controller
             $this->stripeService->cancelSubscription($subscription->stripe_subscription_id);
 
             $subscription->update([
-                'tier' => 'starter',
+                'tier' => 'free',
                 'status' => 'canceled',
                 'updated_at' => now(),
             ]);

@@ -81,6 +81,13 @@ class ProcessRegistryTest extends TestCase
         $this->assertEmpty(RexProcess::Reporting->approvalTypes());
     }
 
+    public function test_tax_notice_review_is_unavailable_until_orchestrator_handler_exists(): void
+    {
+        $this->assertSame('orchestrator', RexProcess::TaxNoticeReview->mode());
+        $this->assertSame(ProcessReadiness::Unavailable, RexProcess::TaxNoticeReview->readiness());
+        $this->assertEmpty(RexProcess::TaxNoticeReview->approvalTypes());
+    }
+
     public function test_recommendation_review_is_available_agent_mode(): void
     {
         $p = RexProcess::RecommendationReview;
@@ -117,10 +124,7 @@ class ProcessRegistryTest extends TestCase
 
     public function test_resolve_or_default_falls_back_for_unavailable_process(): void
     {
-        // Mark investigation_synthesis as preview — resolveOrDefault only falls back for Unavailable
-        // Preview processes still resolve to themselves.
-        $result = RexProcess::resolveOrDefault('investigation_synthesis');
-        $this->assertSame(RexProcess::InvestigationSynthesis, $result);
+        $this->assertSame(RexProcess::RiskReview, RexProcess::resolveOrDefault('tax_notice_review'));
     }
 
     public function test_available_returns_only_available_processes(): void
@@ -132,6 +136,7 @@ class ProcessRegistryTest extends TestCase
         // InvestigationSynthesis is now Available (promoted from Preview)
         $this->assertContains(RexProcess::InvestigationSynthesis, $available);
         $this->assertNotContains(RexProcess::Reporting, $available);
+        $this->assertNotContains(RexProcess::TaxNoticeReview, $available);
     }
 
     public function test_routable_by_llm_returns_only_available_agent_processes(): void

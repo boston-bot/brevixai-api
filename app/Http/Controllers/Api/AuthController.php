@@ -67,7 +67,15 @@ class AuthController extends Controller
 
             DB::commit();
 
-            // 4. Generate Sanctum Token
+            // 4. Send the verification email. Never fail signup over mail
+            // transport problems — the user can resend from the app.
+            try {
+                $user->sendEmailVerificationNotification();
+            } catch (Throwable $mailError) {
+                report($mailError);
+            }
+
+            // 5. Generate Sanctum Token
             $token = $user->createToken('auth_token')->plainTextToken;
 
             return response()->json([
@@ -256,6 +264,7 @@ class AuthController extends Controller
         return [
             'id' => $user->id,
             'email' => $user->email,
+            'emailVerified' => $user->hasVerifiedEmail(),
             'firstName' => $user->first_name,
             'lastName' => $user->last_name,
             'companyId' => $user->company_id,

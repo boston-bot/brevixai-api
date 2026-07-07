@@ -39,6 +39,7 @@ class SmokeCheckCommandTest extends TestCase
             ->expectsOutputToContain('entity_relationship_risk route payload resolves')
             ->expectsOutputToContain('transaction_detail route payload resolves')
             ->expectsOutputToContain('pending_recommendations route payload resolves')
+            ->expectsOutputToContain('irs_notice_extract route payload resolves (POST)')
             ->assertExitCode(0);
     }
 
