@@ -65,10 +65,10 @@ $personalFinanceRoutes = function (): void {
 
 // Public Auth Routes
 Route::prefix('auth')->group(function () {
-    Route::post('/signup', [AuthController::class, 'signup']);
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+    Route::post('/signup', [AuthController::class, 'signup'])->middleware('throttle:auth.signup');
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth.login');
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:auth.password-reset');
+    Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:auth.password-reset');
 
     // Signed link target from the verification email; user may not be logged
     // in on the device that opens it, so it is signed rather than authed.
