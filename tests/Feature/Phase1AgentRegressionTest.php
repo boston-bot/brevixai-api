@@ -67,6 +67,7 @@ class Phase1AgentRegressionTest extends TestCase
                 'intent',
                 'findings',
                 'recommended_actions',
+                'can_create_investigation',
                 'can_create_alert',
                 'requires_review',
                 'trace_id',
@@ -267,6 +268,7 @@ class Phase1AgentRegressionTest extends TestCase
                 'intent',
                 'findings',
                 'recommended_actions',
+                'can_create_investigation',
                 'can_create_alert',
                 'requires_review',
                 'trace_id',
@@ -355,14 +357,16 @@ class Phase1AgentRegressionTest extends TestCase
                 'intent',
                 'findings',
                 'recommended_actions',
+                'can_create_investigation',
                 'can_create_alert',
                 'requires_review',
                 'trace_id',
             ])
-            ->assertJsonPath('message', 'I could not complete the risk review right now. No alerts or cases were created. Please try again or review the dashboard manually.')
+            ->assertJsonPath('message', 'I could not complete the risk review right now. No investigations were created. Please try again or review the dashboard manually.')
             ->assertJsonPath('intent', 'agent_service_unavailable')
             ->assertJsonPath('findings', [])
             ->assertJsonPath('recommended_actions', [])
+            ->assertJsonPath('can_create_investigation', false)
             ->assertJsonPath('can_create_alert', false)
             ->assertJsonPath('requires_review', false);
 
