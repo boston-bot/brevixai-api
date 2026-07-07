@@ -25,6 +25,7 @@ class AgentActionExecutorTest extends TestCase
         parent::setUp();
 
         Schema::dropIfExists('alerts');
+        Schema::dropIfExists('investigations');
         Schema::dropIfExists('agent_action_approvals');
         Schema::dropIfExists('agent_runs');
         Schema::dropIfExists('users');
@@ -104,12 +105,35 @@ class AgentActionExecutorTest extends TestCase
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
         });
+
+        Schema::create('investigations', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->uuid('company_id');
+            $table->uuid('business_profile_id')->nullable();
+            $table->text('title');
+            $table->text('category')->default('unsure');
+            $table->text('status')->default('open');
+            $table->text('priority')->default('medium');
+            $table->text('scope_statement')->nullable();
+            $table->json('scope_limitations')->nullable();
+            $table->uuid('created_by');
+            $table->timestamp('opened_at')->nullable();
+            $table->timestamp('last_activity_at')->nullable();
+            $table->json('metadata')->nullable();
+            $table->timestamps();
+        });
     }
 
     public function test_supported_action_types_includes_create_alert(): void
     {
         $executor = new AgentActionExecutorService();
         $this->assertContains('create_alert', $executor->supportedActionTypes());
+    }
+
+    public function test_supported_action_types_includes_create_investigation(): void
+    {
+        $executor = new AgentActionExecutorService();
+        $this->assertContains('create_investigation', $executor->supportedActionTypes());
     }
 
     public function test_execute_throws_invalid_argument_for_unsupported_type(): void
@@ -143,6 +167,27 @@ class AgentActionExecutorTest extends TestCase
 
         $this->assertDatabaseHas('alerts', ['company_id' => $company->id]);
         $this->assertDatabaseMissing('alerts', ['company_id' => 'payload-company-should-be-ignored']);
+    }
+
+    public function test_create_investigation_returns_canonical_investigation_result(): void
+    {
+        [$company, $user, $approval] = $this->fixtures(actionType: 'create_investigation', extraPayload: [
+            'title' => 'Duplicate Payment Pattern',
+            'category' => 'vendor_payment',
+            'severity' => 'high',
+            'summary' => 'Review repeated payments to the same vendor.',
+        ]);
+
+        $result = (new AgentActionExecutorService())->execute($approval, $user);
+
+        $this->assertSame('investigation', $result->resourceType);
+        $this->assertDatabaseHas('investigations', [
+            'id' => $result->resourceId,
+            'company_id' => $company->id,
+            'title' => 'Duplicate Payment Pattern',
+            'category' => 'vendor_payments',
+            'priority' => 'high',
+        ]);
     }
 
     public function test_approval_record_contains_full_audit_trail_after_execution(): void

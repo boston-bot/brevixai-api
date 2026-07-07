@@ -230,6 +230,7 @@ class AgentChatControllerTest extends TestCase
             'intent',
             'findings',
             'recommended_actions',
+            'can_create_investigation',
             'can_create_alert',
             'requires_review',
             'trace_id',
@@ -238,6 +239,7 @@ class AgentChatControllerTest extends TestCase
         ], array_keys($response->json()));
         $response->assertJsonPath('degraded_tools.0.tool', 'entity_relationship_risk')
             ->assertJsonPath('degraded_tools.0.affected_confidence', true);
+        $this->assertFalse($response->json('can_create_investigation'));
         $this->assertTrue($response->json('can_create_alert'));
         $this->assertTrue($response->json('requires_review'));
         $this->assertNotEmpty($response->json('trace_id'));
@@ -372,10 +374,11 @@ class AgentChatControllerTest extends TestCase
         ]);
 
         $response->assertStatus(502)
-            ->assertJsonPath('message', 'I could not complete the risk review right now. No alerts or cases were created. Please try again or review the dashboard manually.')
+            ->assertJsonPath('message', 'I could not complete the risk review right now. No investigations were created. Please try again or review the dashboard manually.')
             ->assertJsonPath('intent', 'agent_service_unavailable')
             ->assertJsonPath('findings', [])
             ->assertJsonPath('recommended_actions', [])
+            ->assertJsonPath('can_create_investigation', false)
             ->assertJsonPath('can_create_alert', false)
             ->assertJsonPath('requires_review', false);
 
@@ -384,6 +387,7 @@ class AgentChatControllerTest extends TestCase
             'intent',
             'findings',
             'recommended_actions',
+            'can_create_investigation',
             'can_create_alert',
             'requires_review',
             'trace_id',

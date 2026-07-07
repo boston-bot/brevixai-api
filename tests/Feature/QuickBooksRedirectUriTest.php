@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Jobs\SyncQuickBooksCompanyJob;
 use App\Services\QboService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -143,6 +145,8 @@ class QuickBooksRedirectUriTest extends TestCase
 
     public function test_qbo_callback_redirects_to_settings_with_connected_notice(): void
     {
+        Queue::fake();
+
         $this->mock(QboService::class, function ($mock): void {
             $mock->shouldReceive('consumeOAuthStateNoncePayload')
                 ->once()
@@ -163,6 +167,8 @@ class QuickBooksRedirectUriTest extends TestCase
 
         $this->get('/api/integrations/qbo/callback?state=state-nonce&realmId=realm-1&code=auth-code')
             ->assertRedirect('http://localhost:8081/settings?quickbooks=connected');
+
+        Queue::assertPushed(SyncQuickBooksCompanyJob::class);
     }
 
     /**

@@ -239,6 +239,10 @@ class ActionPlanService
      */
     private function openFindings(string $companyId, ?string $businessProfileId): array
     {
+        if (Schema::hasTable('findings')) {
+            return $this->canonicalOpenFindings($companyId, $businessProfileId);
+        }
+
         if (! Schema::hasTable('alerts')) {
             return ['count' => 0, 'items' => []];
         }
@@ -264,6 +268,54 @@ class ActionPlanService
             ->all();
 
         return ['count' => count($items), 'items' => $items];
+    }
+
+    /**
+     * @return array{count: int, items: list<array<string, mixed>>}
+     */
+    private function canonicalOpenFindings(string $companyId, ?string $businessProfileId): array
+    {
+        $query = DB::table('findings')
+            ->where('company_id', $companyId)
+            ->whereIn('status', ['new', 'in_review', 'needs_more_evidence', 'escalated']);
+        if ($businessProfileId && Schema::hasColumn('findings', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+
+        $items = $query
+            ->orderByRaw("CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
+            ->orderByDesc(Schema::hasColumn('findings', 'created_at') ? 'created_at' : 'id')
+            ->limit(5)
+            ->get()
+            ->map(fn (object $finding): array => [
+                'id' => (string) ($finding->id ?? ''),
+                'title' => (string) ($finding->title ?? 'Open finding'),
+                'severity' => (string) ($finding->severity ?? 'info'),
+                'detail' => (string) ($finding->detail ?? $finding->summary ?? 'Review this finding when the supporting evidence is available.'),
+                'status' => (string) ($finding->status ?? 'new'),
+                'sourceSystem' => (string) ($finding->source_module ?? 'finding'),
+                'reasonCode' => $finding->reason_code ?? null,
+                'evidenceRefs' => $this->jsonArray($finding->evidence_refs ?? []),
+                'investigationId' => $finding->investigation_id ?? null,
+            ])
+            ->values()
+            ->all();
+
+        return ['count' => count($items), 'items' => $items];
+    }
+
+    private function jsonArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (! is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     /**

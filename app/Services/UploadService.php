@@ -31,8 +31,8 @@ class UploadService
         $originalFilename = $data['originalFilename'];
         $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
 
-        if (! in_array($extension, ['csv', 'xlsx'])) {
-            throw new Exception('Only .csv and .xlsx files are supported', 400);
+        if ($extension !== 'csv') {
+            throw new Exception('Only .csv files are supported right now', 400);
         }
 
         $claimedContentType = $data['claimedContentType'] ?? 'application/octet-stream';
@@ -87,7 +87,7 @@ class UploadService
             'quarantineKey' => $quarantineKey,
             'acceptedConstraints' => [
                 'maxFileSizeBytes' => $this->planPolicy->uploadMaxFileSizeBytes($companyId),
-                'acceptedExtensions' => ['.csv', '.xlsx'],
+                'acceptedExtensions' => ['.csv'],
             ],
         ];
     }
@@ -135,9 +135,6 @@ class UploadService
             return null;
         }
 
-        // Fetch related inspection, mapping, validation, and batch (stubbed for brevity as per architecture constraints,
-        // typically joining on upload_inspections, upload_mapping_versions, etc.)
-
         return [
             'id' => $upload->id,
             'importType' => $upload->import_type,
@@ -154,9 +151,9 @@ class UploadService
             'inspectedAt' => $upload->inspected_at,
             'validatedAt' => $upload->validated_at,
             'promotedAt' => $upload->promoted_at,
-            'latestMappingVersion' => null, // Placeholder for mappings table
-            'latestValidationRun' => null, // Placeholder for validation runs table
-            'latestImportBatch' => null, // Placeholder for import batches table
+            'latestMappingVersion' => $this->latestMappingVersion($companyId, $upload, $businessProfileId),
+            'latestValidationRun' => $this->latestValidationRun($companyId, $upload, $businessProfileId),
+            'latestImportBatch' => $this->latestImportBatch($companyId, $upload, $businessProfileId),
         ];
     }
 
@@ -242,28 +239,118 @@ class UploadService
             throw new Exception('Upload inspection is not ready yet', 409);
         }
 
-        $sheets = json_decode($inspection->sheet_inventory, true) ?? [];
+        $samplePreview = json_decode($inspection->sample_preview, true) ?? [];
+        $sheets = $this->normalizeSheets(json_decode($inspection->sheet_inventory, true) ?? [], $samplePreview);
         $firstSheet = $sheets[0] ?? [];
-        $headers = $firstSheet['headers'] ?? [];
+        $headers = $firstSheet['columns'] ?? [];
 
         [$fieldMappings, $confidenceHints] = $this->suggestMappings($headers, $upload->import_type);
 
         return [
             'uploadId' => $uploadId,
             'importType' => $upload->import_type,
+            'importTypeDefinition' => $this->importTypeDefinition($upload->import_type),
             'inspection' => [
                 'detectedContentType' => json_decode($inspection->workbook_metadata)->detectedContentType ?? 'application/octet-stream',
+                'totalRows' => array_sum(array_map(fn (array $sheet): int => (int) ($sheet['rowCount'] ?? 0), $sheets)),
                 'sheets' => $sheets,
                 'parserWarnings' => json_decode($inspection->parser_warnings, true) ?? [],
-                'samplePreview' => json_decode($inspection->sample_preview, true) ?? [],
+                'samplePreview' => $samplePreview,
             ],
             'mappingSuggestion' => [
                 'sourceSheetName' => $firstSheet['name'] ?? null,
-                'headerRowIndex' => 1,
+                'headerRowIndex' => (int) ($firstSheet['headerRowIndex'] ?? 1),
                 'fieldMappings' => $fieldMappings,
                 'confidenceHints' => $confidenceHints,
             ],
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function importTypeDefinition(?string $importType): array
+    {
+        $definitions = [
+            'transaction_ledger' => [
+                'key' => 'transaction_ledger',
+                'label' => 'Transaction Ledger',
+                'targetDomain' => 'transactions',
+                'fields' => [
+                    ['key' => 'date', 'label' => 'Date', 'required' => true, 'kind' => 'date'],
+                    ['key' => 'vendor_customer', 'label' => 'Vendor or Customer', 'required' => true, 'kind' => 'string'],
+                    ['key' => 'amount', 'label' => 'Amount', 'required' => true, 'kind' => 'number'],
+                    ['key' => 'type', 'label' => 'Type', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'category', 'label' => 'Category', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'payment_method', 'label' => 'Payment Method', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'department', 'label' => 'Department', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'invoice_ref', 'label' => 'Invoice Reference', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'memo', 'label' => 'Memo', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'txn_id', 'label' => 'Transaction ID', 'required' => false, 'kind' => 'string'],
+                ],
+            ],
+            'ap_invoice_register' => [
+                'key' => 'ap_invoice_register',
+                'label' => 'AP Invoice Register',
+                'targetDomain' => 'transactions',
+                'fields' => [
+                    ['key' => 'date', 'label' => 'Invoice Date', 'required' => true, 'kind' => 'date'],
+                    ['key' => 'vendor_customer', 'label' => 'Vendor', 'required' => true, 'kind' => 'string'],
+                    ['key' => 'invoice_ref', 'label' => 'Invoice Number', 'required' => true, 'kind' => 'string'],
+                    ['key' => 'amount', 'label' => 'Invoice Amount', 'required' => true, 'kind' => 'number'],
+                    ['key' => 'category', 'label' => 'Category', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'memo', 'label' => 'Memo', 'required' => false, 'kind' => 'string'],
+                ],
+            ],
+            'ar_aging' => [
+                'key' => 'ar_aging',
+                'label' => 'AR Aging',
+                'targetDomain' => 'transactions',
+                'fields' => [
+                    ['key' => 'date', 'label' => 'Invoice Date', 'required' => true, 'kind' => 'date'],
+                    ['key' => 'vendor_customer', 'label' => 'Customer', 'required' => true, 'kind' => 'string'],
+                    ['key' => 'invoice_ref', 'label' => 'Invoice Number', 'required' => false, 'kind' => 'string'],
+                    ['key' => 'amount', 'label' => 'Open Amount', 'required' => true, 'kind' => 'number'],
+                    ['key' => 'memo', 'label' => 'Memo', 'required' => false, 'kind' => 'string'],
+                ],
+            ],
+        ];
+
+        return $definitions[$importType] ?? $definitions['transaction_ledger'];
+    }
+
+    /** @param list<array<string, mixed>> $sheets */
+    private function normalizeSheets(array $sheets, array $samplePreview): array
+    {
+        return array_values(array_map(function (array $sheet) use ($samplePreview): array {
+            $columns = array_values(array_filter($sheet['columns'] ?? $sheet['headers'] ?? [], fn (mixed $value): bool => trim((string) $value) !== ''));
+            $previewRows = array_map(
+                fn (mixed $row): array => $this->previewRowValues($row, $columns),
+                $sheet['preview'] ?? $samplePreview
+            );
+
+            return [
+                'name' => (string) ($sheet['name'] ?? 'Sheet1'),
+                'hidden' => (bool) ($sheet['hidden'] ?? false),
+                'headerRowIndex' => (int) ($sheet['headerRowIndex'] ?? 1),
+                'rowCount' => (int) ($sheet['rowCount'] ?? 0),
+                'columns' => $columns,
+                'preview' => $previewRows,
+                'warnings' => array_values($sheet['warnings'] ?? []),
+            ];
+        }, $sheets));
+    }
+
+    /** @param list<string> $columns */
+    private function previewRowValues(mixed $row, array $columns): array
+    {
+        if (! is_array($row)) {
+            return [];
+        }
+
+        if (array_is_list($row)) {
+            return $row;
+        }
+
+        return array_map(fn (string $column): mixed => $row[$column] ?? null, $columns);
     }
 
     private function suggestMappings(array $headers, ?string $importType): array
@@ -383,6 +470,126 @@ class UploadService
         PromoteUploadJob::dispatch($uploadId, $companyId, $userId);
 
         return ['status' => 'promotion_pending', 'statusDetail' => 'Promotion has been queued.'];
+    }
+
+    private function latestMappingVersion(string $companyId, Upload $upload, ?string $businessProfileId): ?array
+    {
+        if (! Schema::hasTable('upload_mapping_versions')) {
+            return null;
+        }
+
+        $query = DB::table('upload_mapping_versions')
+            ->where('upload_id', $upload->id)
+            ->where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('upload_mapping_versions', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+
+        if ($upload->latest_mapping_version_id) {
+            $query->where('id', $upload->latest_mapping_version_id);
+        }
+
+        $mapping = $query
+            ->orderByDesc(Schema::hasColumn('upload_mapping_versions', 'version_number') ? 'version_number' : 'created_at')
+            ->first();
+
+        if (! $mapping) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $mapping->id,
+            'versionNumber' => (int) ($mapping->version_number ?? 1),
+            'importType' => (string) ($mapping->import_type ?? $upload->import_type),
+            'sourceSheetName' => $mapping->source_sheet_name ?? null,
+            'fieldMappings' => $this->jsonArray($mapping->field_mappings ?? null),
+            'createdAt' => $mapping->created_at ?? null,
+        ];
+    }
+
+    private function latestValidationRun(string $companyId, Upload $upload, ?string $businessProfileId): ?array
+    {
+        if (! Schema::hasTable('upload_validation_runs')) {
+            return null;
+        }
+
+        $query = DB::table('upload_validation_runs')
+            ->where('upload_id', $upload->id)
+            ->where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('upload_validation_runs', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+
+        if ($upload->latest_validation_run_id) {
+            $query->where('id', $upload->latest_validation_run_id);
+        }
+
+        $run = $query
+            ->orderByDesc(Schema::hasColumn('upload_validation_runs', 'created_at') ? 'created_at' : 'id')
+            ->first();
+
+        return $run ? $this->validationRunPayload($run) : null;
+    }
+
+    private function latestImportBatch(string $companyId, Upload $upload, ?string $businessProfileId): ?array
+    {
+        if (! Schema::hasTable('import_batches')) {
+            return null;
+        }
+
+        $query = DB::table('import_batches')
+            ->where('upload_id', $upload->id)
+            ->where('company_id', $companyId);
+        if ($businessProfileId && Schema::hasColumn('import_batches', 'business_profile_id')) {
+            $query->where('business_profile_id', $businessProfileId);
+        }
+
+        $batch = $query
+            ->orderByDesc(Schema::hasColumn('import_batches', 'promoted_at') ? 'promoted_at' : 'id')
+            ->first();
+
+        if (! $batch) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $batch->id,
+            'trustedTargetDomain' => (string) ($batch->trusted_target_domain ?? $upload->import_type),
+            'importedRowCount' => (int) ($batch->imported_row_count ?? 0),
+            'skippedRowCount' => (int) ($batch->skipped_row_count ?? 0),
+            'failedRowCount' => (int) ($batch->failed_row_count ?? 0),
+            'promotedAt' => $batch->promoted_at ?? null,
+        ];
+    }
+
+    private function validationRunPayload(object $run): array
+    {
+        $summary = $this->jsonArray($run->summary ?? null);
+
+        return [
+            'id' => (string) $run->id,
+            'status' => (string) ($run->status ?? 'pending'),
+            'totalRowCount' => (int) ($run->total_row_count ?? ($summary['totalRows'] ?? 0)),
+            'validRowCount' => (int) ($run->valid_row_count ?? ($summary['validRows'] ?? 0)),
+            'invalidRowCount' => (int) ($run->invalid_row_count ?? 0),
+            'blockingErrorCount' => (int) ($run->blocking_error_count ?? ($summary['blockingErrors'] ?? 0)),
+            'warningCount' => (int) ($run->warning_count ?? ($summary['warnings'] ?? 0)),
+            'summary' => $summary,
+        ];
+    }
+
+    private function jsonArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (! is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function writeAuditLog(string $companyId, string $userId, string $eventType, string $uploadId, array $payload = []): void
