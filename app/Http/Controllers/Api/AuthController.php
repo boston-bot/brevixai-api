@@ -8,8 +8,8 @@ use App\Models\PasswordReset;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WorkspaceMembership;
+use App\Notifications\ResetPasswordLink;
 use App\Services\BusinessProfileContextService;
-use App\Services\PlanPolicyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +31,8 @@ class AuthController extends Controller
             'companyName' => 'required|string',
             'firstName' => 'nullable|string',
             'lastName' => 'nullable|string',
+            // 'tier' is accepted for backward compatibility but ignored:
+            // paid tiers are only granted through the Stripe checkout flow.
             'tier' => 'nullable|string',
         ]);
 
@@ -43,12 +45,12 @@ class AuthController extends Controller
                 'name' => $request->input('companyName'),
             ]);
 
-            // 2. Setup Subscription
-            $tier = app(PlanPolicyService::class)->normalizeTier($request->input('tier') ?? 'free');
-
+            // 2. Setup Subscription. Signups always start on the free tier
+            // regardless of any client-submitted value — upgrading requires
+            // payment via the subscription checkout endpoint.
             Subscription::create([
                 'company_id' => $company->id,
-                'tier' => $tier,
+                'tier' => 'free',
                 'status' => 'active',
             ]);
 
@@ -168,6 +170,14 @@ class AuthController extends Controller
                 'expires_at' => now()->addHour(),
                 'used' => false,
             ]);
+
+            // Never fail (or slow-leak) over mail transport problems — the
+            // response must be indistinguishable from the unknown-email path.
+            try {
+                $user->notify(new ResetPasswordLink($rawToken));
+            } catch (Throwable $mailError) {
+                report($mailError);
+            }
         }
 
         return response()->json(['message' => 'If an account with that email exists, a password reset link has been sent.']);
