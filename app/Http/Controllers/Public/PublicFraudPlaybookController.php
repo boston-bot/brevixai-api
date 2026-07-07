@@ -1,21 +1,22 @@
 <?php
 
-namespace App\Http\Controllers\Internal;
+namespace App\Http\Controllers\Public;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\Fraud\RetrievalFeedback;
 use App\Services\Retrieval\FraudPlaybookRetriever;
 use App\Services\Retrieval\RetrievalQuery;
 use App\Services\Retrieval\RetrievalService;
 use App\Support\ProfessionalServicesDisclaimer;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
-class FraudPlaybookSearchController extends Controller
+/**
+ * Unauthenticated, rate-limited fraud playbook lookup for the public-facing
+ * trust-building tool. No company data is required or accepted.
+ */
+class PublicFraudPlaybookController extends Controller
 {
-    /**
-     * Search for fraud playbooks.
-     */
     public function search(Request $request, RetrievalService $retrieval): JsonResponse
     {
         $request->validate([
@@ -37,9 +38,6 @@ class FraudPlaybookSearchController extends Controller
         return response()->json($response);
     }
 
-    /**
-     * Store retrieval feedback for a playbook.
-     */
     public function feedback(Request $request): JsonResponse
     {
         $request->validate([
@@ -54,7 +52,6 @@ class FraudPlaybookSearchController extends Controller
             'query_text' => $request->input('query_text'),
             'relevance_score' => $request->input('relevance_score'),
             'user_feedback' => $request->input('user_feedback'),
-            // 'user_id' => $request->user()?->id,
         ]);
 
         return response()->json([

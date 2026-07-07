@@ -59,8 +59,8 @@ class IntegrationController extends Controller
         try {
             $this->qboService->exchangeTokens($companyId, $realmId, $code, $this->qboService->redirectUri(), $businessProfileId);
             
-            // Redirect back to frontend
-            return redirect(config('app.frontend_url', config('app.url')) . '/settings');
+            // Redirect back to frontend with a first-run notice trigger.
+            return redirect(config('app.frontend_url', config('app.url')) . '/settings?quickbooks=connected');
         } catch (Exception $e) {
             return response('Failed to complete QuickBooks authentication: ' . $e->getMessage(), 500);
         }

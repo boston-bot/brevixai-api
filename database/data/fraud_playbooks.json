@@ -1,0 +1,425 @@
+{
+    "source": {
+        "name": "Brevix Fraud Library",
+        "description": "Curated small-business fraud investigation playbooks maintained by Brevix. Symptoms are written in owner language so natural-language concerns match lexically."
+    },
+    "version": "2026.07",
+    "playbooks": [
+        {
+            "title": "Duplicate invoice and split payment review",
+            "category": "expense",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate repeated vendor invoices, invoices paid twice, and payments split below approval thresholds.",
+            "symptoms": [
+                "an invoice was paid twice",
+                "we got double charged by a vendor",
+                "the same bill shows up more than once",
+                "duplicate payments to one vendor in the same week"
+            ],
+            "red_flags": [
+                "duplicate invoice numbers or amounts to the same vendor",
+                "multiple payments just below an approval threshold",
+                "invoice numbers that increment suspiciously fast",
+                "same invoice paid from two different accounts"
+            ],
+            "tests": [
+                "match invoice numbers against vendor and payment date",
+                "group payments by vendor and amount within 30-day windows",
+                "compare split payments against the approval threshold"
+            ],
+            "document_requests": [
+                "vendor invoice register",
+                "approval log",
+                "bank statements for the affected months"
+            ]
+        },
+        {
+            "title": "Ghost employee payroll review",
+            "category": "payroll",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate payroll payments to employees with missing HR records, unknown names, or shared deposit accounts.",
+            "symptoms": [
+                "there is an employee on payroll I don't recognize",
+                "someone on the payroll never shows up to work",
+                "payroll headcount doesn't match the people I employ",
+                "a terminated employee is still being paid"
+            ],
+            "red_flags": [
+                "employee has no personnel file or tax forms",
+                "two employees share a bank account or address",
+                "no time entries but regular paychecks",
+                "pay continues after termination date"
+            ],
+            "tests": [
+                "reconcile payroll register against HR records and tax filings",
+                "match employee deposit accounts for duplicates",
+                "compare time entries to paychecks per employee"
+            ],
+            "document_requests": [
+                "payroll register",
+                "employee personnel files",
+                "direct deposit account list",
+                "termination records"
+            ]
+        },
+        {
+            "title": "Related party supplier review",
+            "category": "vendor",
+            "intent_key": "vendor_payment_controls",
+            "description": "Review vendor master data for hidden relationships between vendors and employees.",
+            "symptoms": [
+                "a vendor and an employee might be connected",
+                "same bank account shared by employee and vendor",
+                "vendor address looks like an employee's home address"
+            ],
+            "red_flags": [
+                "vendor bank account matches an employee direct deposit account",
+                "shared home address between vendor and employee",
+                "vendor registered shortly before first large payment",
+                "employee approves invoices for a vendor they created"
+            ],
+            "tests": [
+                "compare vendor bank accounts to employee direct deposit accounts",
+                "match vendor addresses and phone numbers against employee records",
+                "review who created and who approves each vendor"
+            ],
+            "document_requests": [
+                "vendor master file",
+                "employee payroll file",
+                "vendor onboarding approvals"
+            ]
+        },
+        {
+            "title": "Shell vendor and fictitious billing review",
+            "category": "vendor",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate vendors that may not exist: no services delivered, vague invoices, and payments to entities with no footprint.",
+            "symptoms": [
+                "we are paying a vendor no one remembers hiring",
+                "invoices are vague and don't say what we bought",
+                "I can't find any information about this supplier"
+            ],
+            "red_flags": [
+                "vendor has no website, phone, or physical address",
+                "invoices lack detail, PO references, or receiving records",
+                "payments started without a contract or onboarding",
+                "vendor name is similar to a real supplier but not identical"
+            ],
+            "tests": [
+                "verify vendor registration and tax identifiers",
+                "trace three invoices to goods received or services delivered",
+                "compare vendor names for near-duplicates of legitimate suppliers"
+            ],
+            "document_requests": [
+                "vendor contracts",
+                "purchase orders and receiving records",
+                "vendor W-9 or registration documents"
+            ]
+        },
+        {
+            "title": "Payment redirection and vendor email compromise review",
+            "category": "payments",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate changed remittance details, urgent wire requests, and email-initiated banking changes (business email compromise).",
+            "symptoms": [
+                "a vendor says they never received our payment",
+                "we got an email asking to change bank details",
+                "money was wired to the wrong account",
+                "someone impersonated our CEO or a supplier by email"
+            ],
+            "red_flags": [
+                "bank detail change requested by email shortly before a large payment",
+                "reply-to domain differs subtly from the vendor's real domain",
+                "urgency and secrecy pressure in payment requests",
+                "remittance account in a different country or name"
+            ],
+            "tests": [
+                "verify every recent bank-detail change by phone against a known number",
+                "compare remittance accounts before and after the change request",
+                "review email headers for spoofed or lookalike domains"
+            ],
+            "document_requests": [
+                "bank change request emails with full headers",
+                "wire transfer confirmations",
+                "vendor master change log"
+            ]
+        },
+        {
+            "title": "Payroll spike and off-cycle payment review",
+            "category": "payroll",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate sudden payroll increases, off-cycle runs, unapproved bonuses, and rate changes.",
+            "symptoms": [
+                "payroll jumped this month and I don't know why",
+                "there was an extra payroll run I didn't approve",
+                "someone's pay rate changed without authorization",
+                "overtime is way higher than normal"
+            ],
+            "red_flags": [
+                "off-cycle payroll runs without documented approval",
+                "rate changes entered and approved by the same person",
+                "bonuses outside the normal review period",
+                "overtime concentrated on one employee or approver"
+            ],
+            "tests": [
+                "compare payroll totals month over month by employee",
+                "list off-cycle runs and match each to an approval",
+                "review rate-change audit history for self-approval"
+            ],
+            "document_requests": [
+                "payroll registers for the last six months",
+                "rate change approvals",
+                "overtime authorization records"
+            ]
+        },
+        {
+            "title": "Bookkeeper transition and segregation of duties review",
+            "category": "controls",
+            "intent_key": "controls_review",
+            "description": "Review control exposure when one person controls the books — especially after a bookkeeper quits, is terminated, or refuses to share access.",
+            "symptoms": [
+                "my bookkeeper quit suddenly",
+                "one person controls both payments and reconciliation",
+                "the bookkeeper won't let anyone else see the books",
+                "records are missing after a staff change"
+            ],
+            "red_flags": [
+                "same person initiates payments and reconciles the bank",
+                "reconciliations are late, missing, or done only by one person",
+                "the departing bookkeeper deleted or exported records",
+                "vendors or balances changed right before the departure"
+            ],
+            "tests": [
+                "inventory who can initiate, approve, and reconcile payments",
+                "re-perform the last three bank reconciliations independently",
+                "review audit logs around the transition date"
+            ],
+            "document_requests": [
+                "bank reconciliations for the last six months",
+                "accounting system access and audit logs",
+                "list of open vendor and payroll changes in the transition window"
+            ]
+        },
+        {
+            "title": "IRS notice and payroll tax diversion review",
+            "category": "tax",
+            "intent_key": "irs_notice_review",
+            "description": "Investigate IRS balance-due or missing-deposit notices that may indicate withheld payroll taxes were diverted rather than deposited.",
+            "symptoms": [
+                "we got an IRS notice saying we owe payroll taxes",
+                "the IRS says deposits are missing but we recorded them",
+                "a CP504 or levy notice arrived unexpectedly",
+                "our payroll company says taxes were paid but the IRS disagrees"
+            ],
+            "red_flags": [
+                "recorded tax deposits with no matching bank withdrawal",
+                "941 filings that don't reconcile to payroll registers",
+                "notices intercepted or hidden from the owner",
+                "payroll tax payments routed through a personal or unknown account"
+            ],
+            "tests": [
+                "reconcile 941 filings to payroll registers and bank withdrawals",
+                "obtain IRS account transcripts and compare to the ledger",
+                "verify deposit destinations for payroll tax payments"
+            ],
+            "document_requests": [
+                "IRS notices and account transcripts",
+                "941 filings and payment confirmations",
+                "payroll tax ledger entries and bank statements"
+            ]
+        },
+        {
+            "title": "Vendor concentration and kickback indicators review",
+            "category": "vendor",
+            "intent_key": "vendor_payment_controls",
+            "description": "Review unusually concentrated vendor spend and buyer favoritism that can indicate kickbacks or conflicts of interest.",
+            "symptoms": [
+                "one vendor gets most of our money",
+                "prices from a favored supplier keep going up",
+                "an employee always pushes the same vendor",
+                "we never get competitive bids"
+            ],
+            "red_flags": [
+                "single vendor share of category spend above 60 percent",
+                "sole-source awards without documented justification",
+                "price increases above market without renegotiation",
+                "buyer lifestyle changes or gifts from the vendor"
+            ],
+            "tests": [
+                "rank vendor spend concentration by category",
+                "compare unit prices against alternative suppliers",
+                "review bid records for the top vendors"
+            ],
+            "document_requests": [
+                "vendor spend summary by category",
+                "bid and quote records",
+                "purchasing policy and buyer assignments"
+            ]
+        },
+        {
+            "title": "Expense reimbursement abuse review",
+            "category": "expense",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate inflated, duplicated, personal, or fictitious employee expense claims.",
+            "symptoms": [
+                "expense reports look inflated",
+                "the same receipt was submitted twice",
+                "personal purchases are showing up as business expenses",
+                "one employee's expenses are far above everyone else's"
+            ],
+            "red_flags": [
+                "duplicate receipts across reports or employees",
+                "round-dollar claims just under receipt-required limits",
+                "weekend or vacation-period business expenses",
+                "merchant categories inconsistent with job role"
+            ],
+            "tests": [
+                "match receipts across reports for duplicates",
+                "compare claim amounts to policy thresholds",
+                "rank expense totals by employee against peers"
+            ],
+            "document_requests": [
+                "expense reports with receipts",
+                "corporate card statements",
+                "expense policy and approval records"
+            ]
+        },
+        {
+            "title": "Check tampering and signature review",
+            "category": "payments",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate altered payees, forged signatures, out-of-sequence checks, and checks written to unexpected parties.",
+            "symptoms": [
+                "a check was altered or the payee looks changed",
+                "checks are missing from the checkbook",
+                "cleared checks don't match the register",
+                "a check was cashed that I never signed"
+            ],
+            "red_flags": [
+                "payee on the cleared check differs from the register",
+                "out-of-sequence or voided-then-cleared checks",
+                "signatures that don't match authorized signers",
+                "checks payable to employees, cash, or unknown parties"
+            ],
+            "tests": [
+                "compare cleared check images to the check register",
+                "list gaps and voids in check sequences",
+                "verify signatures on large checks against authorized signers"
+            ],
+            "document_requests": [
+                "cleared check images from the bank",
+                "check register",
+                "authorized signer list"
+            ]
+        },
+        {
+            "title": "Cash skimming and unrecorded sales review",
+            "category": "cash",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate cash that disappears before it is recorded: register shortages, missing deposits, and declining cash ratios.",
+            "symptoms": [
+                "cash is missing from the register",
+                "deposits are smaller than daily sales",
+                "cash sales are down but card sales are steady",
+                "money seems to disappear before it hits the bank"
+            ],
+            "red_flags": [
+                "deposit totals routinely below point-of-sale cash totals",
+                "no-sale and void transactions clustered on one shift",
+                "declining cash-to-card ratio without a business reason",
+                "deposits made days after the sales date"
+            ],
+            "tests": [
+                "reconcile daily POS cash totals to bank deposits",
+                "trend cash-to-card ratio by month and by shift",
+                "review void and no-sale activity by employee"
+            ],
+            "document_requests": [
+                "point-of-sale daily close reports",
+                "bank deposit slips and statements",
+                "void and discount logs"
+            ]
+        },
+        {
+            "title": "Approval threshold evasion and round-dollar review",
+            "category": "controls",
+            "intent_key": "controls_review",
+            "description": "Review payments engineered to dodge approval limits: split purchases, round-dollar patterns, and just-below-threshold clustering.",
+            "symptoms": [
+                "lots of payments just under our approval limit",
+                "purchases keep getting split into smaller pieces",
+                "too many perfectly round payment amounts"
+            ],
+            "red_flags": [
+                "clusters of payments within 5 percent below the approval threshold",
+                "sequential same-day purchases from one vendor",
+                "high frequency of round-dollar amounts versus peers"
+            ],
+            "tests": [
+                "histogram payment amounts around approval thresholds",
+                "group same-vendor same-day payments and sum them",
+                "measure round-dollar frequency by vendor and requester"
+            ],
+            "document_requests": [
+                "payment listing with requester and approver",
+                "approval policy thresholds",
+                "purchase orders for flagged clusters"
+            ]
+        },
+        {
+            "title": "Company card misuse review",
+            "category": "expense",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate personal or unauthorized spending on company credit and debit cards.",
+            "symptoms": [
+                "personal charges are showing up on the company card",
+                "there are subscriptions on the card nobody recognizes",
+                "card spending doubled with no new business activity",
+                "cash advances on the company card"
+            ],
+            "red_flags": [
+                "merchants inconsistent with business needs (retail, travel, gaming)",
+                "recurring subscriptions with no assigned owner",
+                "cash advances or gift card purchases",
+                "charges on weekends, holidays, or during leave"
+            ],
+            "tests": [
+                "categorize card merchants and flag personal-category spend",
+                "list recurring charges and confirm business owners for each",
+                "compare card activity against work schedules"
+            ],
+            "document_requests": [
+                "card statements for the last six months",
+                "cardholder agreement and policy",
+                "receipts for flagged transactions"
+            ]
+        },
+        {
+            "title": "Refund and credit memo abuse review",
+            "category": "revenue",
+            "intent_key": "suspected_fraud_or_missing_funds",
+            "description": "Investigate fictitious refunds and credit memos used to pocket cash or conceal theft.",
+            "symptoms": [
+                "refunds are way up but returns aren't",
+                "credit memos keep getting issued to the same customer",
+                "a refund went to a card or account that never purchased anything"
+            ],
+            "red_flags": [
+                "refunds without matching original sales",
+                "credit memos concentrated on one employee's logins",
+                "refunds to payment methods different from the original sale",
+                "refund spikes on specific shifts"
+            ],
+            "tests": [
+                "match each refund to an original transaction",
+                "rank refund and credit volume by employee",
+                "compare refund payment destinations to original tender"
+            ],
+            "document_requests": [
+                "refund and credit memo listing",
+                "original sales records for refunded items",
+                "POS user activity logs"
+            ]
+        }
+    ]
+}

@@ -18,6 +18,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'personal.finance.enabled' => \App\Http\Middleware\EnsurePersonalFinanceEnabled::class,
             'personal.finance.local' => \App\Http\Middleware\EnsurePersonalFinanceLocalEnabled::class,
             'fraud.testing.token' => \App\Http\Middleware\AuthenticateFraudTestingToken::class,
+            'email.verified' => \App\Http\Middleware\EnsureEmailIsVerifiedForApi::class,
+            'subscription.paid' => \App\Http\Middleware\EnsureActivePaidSubscription::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\CaseRecommendationController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\ControlsController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\EmailVerificationController;
 use App\Http\Controllers\Api\EntityGraphController;
 use App\Http\Controllers\Api\FindingController;
 use App\Http\Controllers\Api\GnuCashController;
@@ -44,6 +45,8 @@ use App\Http\Controllers\Chat\AgentChatController;
 use App\Http\Controllers\Internal\AgentToolController;
 use App\Http\Controllers\Internal\FraudPlaybookSearchController;
 use App\Http\Controllers\Internal\IrmKnowledgeController;
+use App\Http\Controllers\Public\PublicFraudPlaybookController;
+use App\Http\Controllers\Public\PublicIrmLookupController;
 use Illuminate\Support\Facades\Route;
 
 $personalFinanceRoutes = function (): void {
@@ -66,6 +69,20 @@ Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+
+    // Signed link target from the verification email; user may not be logged
+    // in on the device that opens it, so it is signed rather than authed.
+    Route::get('/verify-email/{id}/{hash}', [EmailVerificationController::class, 'verify'])
+        ->middleware(['signed', 'throttle:6,1'])
+        ->name('verification.verify');
+});
+
+// Authenticated routes that must remain reachable BEFORE email verification.
+Route::middleware('auth:sanctum')->prefix('auth')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/resend-verification', [EmailVerificationController::class, 'resend'])
+        ->middleware('throttle:6,1');
 });
 
 Route::prefix('site')->group(function () {
@@ -82,6 +99,16 @@ Route::get('integrations/qbo/callback', [IntegrationController::class, 'qboCallb
 Route::post('webhooks/stripe', [StripeWebhookController::class, 'handle']);
 
 Route::get('/investigation-platform/contract', [InvestigationPlatformContractController::class, 'contract']);
+
+// Public trust-building tools — no auth, no company data, rate-limited per IP.
+Route::prefix('public/tools')
+    ->middleware('throttle:20,1')
+    ->group(function () {
+        Route::get('/irs-notice-lookup', [PublicIrmLookupController::class, 'search']);
+        Route::get('/irs-notice-lookup/section', [PublicIrmLookupController::class, 'section']);
+        Route::get('/fraud-check', [PublicFraudPlaybookController::class, 'search']);
+        Route::post('/fraud-check/feedback', [PublicFraudPlaybookController::class, 'feedback']);
+    });
 
 Route::prefix('internal/agent-tools')
     ->middleware('agent.tool')
@@ -111,7 +138,7 @@ Route::prefix('internal/agent-tools')
         Route::post('/fraud/playbooks/feedback', [FraudPlaybookSearchController::class, 'feedback']);
     });
 
-Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes): void {
+Route::middleware(['auth:sanctum', 'email.verified'])->group(function () use ($personalFinanceRoutes): void {
     Route::get('/workspaces', [WorkspaceController::class, 'index']);
     Route::post('/workspaces', [WorkspaceController::class, 'store']);
 
@@ -152,10 +179,9 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
             Route::post('/scenarios/{id}/provision-workspace', [FraudScenarioController::class, 'provisionAdminWorkspace']);
         });
 
-    // Protected Auth Routes
+    // Protected Auth Routes (logout/me/resend-verification live in the
+    // pre-verification group above)
     Route::prefix('auth')->group(function () {
-        Route::post('/logout', [AuthController::class, 'logout']);
-        Route::get('/me', [AuthController::class, 'me']);
         Route::post('/complete-onboarding', [AuthController::class, 'completeOnboarding']);
     });
 
@@ -196,10 +222,10 @@ Route::middleware('auth:sanctum')->group(function () use ($personalFinanceRoutes
         });
     });
 
-    // Chat
-    Route::prefix('chat')->group(function () {
+    // Chat — Rex is the paid surface; every chat route requires an active
+    // Pro subscription in addition to auth + verified email.
+    Route::prefix('chat')->middleware('subscription.paid')->group(function () {
         Route::post('/agent/messages', [AgentChatController::class, 'store']);
-        Route::get('/stream', [ChatController::class, 'stream']);
         Route::get('/usage', [ChatController::class, 'usage']);
         Route::get('/sessions', [ChatController::class, 'index']);
         Route::post('/sessions', [ChatController::class, 'store']);

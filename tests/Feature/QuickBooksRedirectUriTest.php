@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\QboService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -138,6 +139,30 @@ class QuickBooksRedirectUriTest extends TestCase
             ->assertJson([
                 'error' => 'QuickBooks credentials are invalid for this company.',
             ]);
+    }
+
+    public function test_qbo_callback_redirects_to_settings_with_connected_notice(): void
+    {
+        $this->mock(QboService::class, function ($mock): void {
+            $mock->shouldReceive('consumeOAuthStateNoncePayload')
+                ->once()
+                ->with('state-nonce')
+                ->andReturn([
+                    'company_id' => 'company-1',
+                    'business_profile_id' => 'profile-1',
+                ]);
+
+            $mock->shouldReceive('redirectUri')
+                ->once()
+                ->andReturn('http://localhost:8081/callback');
+
+            $mock->shouldReceive('exchangeTokens')
+                ->once()
+                ->with('company-1', 'realm-1', 'auth-code', 'http://localhost:8081/callback', 'profile-1');
+        });
+
+        $this->get('/api/integrations/qbo/callback?state=state-nonce&realmId=realm-1&code=auth-code')
+            ->assertRedirect('http://localhost:8081/settings?quickbooks=connected');
     }
 
     /**

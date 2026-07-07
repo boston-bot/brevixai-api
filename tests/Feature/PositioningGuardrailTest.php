@@ -33,6 +33,32 @@ class PositioningGuardrailTest extends TestCase
         $this->assertStringNotContainsString('general accounting, audit', $prompt);
     }
 
+    public function test_rex_router_does_not_advertise_unavailable_tax_notice_review_route(): void
+    {
+        $router = app(RexChatRouterService::class);
+        $prompt = $this->privateMethod($router, 'systemPrompt');
+
+        $this->assertStringNotContainsString('tax_notice_review', $prompt);
+    }
+
+    public function test_rex_router_routes_unavailable_processes_to_direct_mode(): void
+    {
+        $router = app(RexChatRouterService::class);
+
+        $decision = $this->privateMethod($router, 'normalizeDecision', [
+            'mode' => 'agent',
+            'requested_action' => 'tax_notice_review',
+            'reason' => 'tax_notice_requested',
+        ], 'Review this CP504 notice.');
+
+        $this->assertSame([
+            'mode' => 'direct',
+            'route' => null,
+            'requested_action' => null,
+            'reason' => 'process_unavailable_fallback',
+        ], $decision);
+    }
+
     public function test_shared_professional_services_disclaimer_covers_required_boundaries(): void
     {
         $disclaimer = ProfessionalServicesDisclaimer::TEXT;
@@ -45,12 +71,12 @@ class PositioningGuardrailTest extends TestCase
         $this->assertStringContainsString('not', strtolower($disclaimer));
     }
 
-    private function privateMethod(object $object, string $method): string
+    private function privateMethod(object $object, string $method, mixed ...$arguments): mixed
     {
         $reflection = new ReflectionClass($object);
         $reflectedMethod = $reflection->getMethod($method);
         $reflectedMethod->setAccessible(true);
 
-        return (string) $reflectedMethod->invoke($object);
+        return $reflectedMethod->invoke($object, ...$arguments);
     }
 }
