@@ -26,6 +26,8 @@ class AgentToolEndpointTest extends TestCase
         config(['services.brevix_agent.api_key' => 'test-tool-key']);
 
         Schema::dropIfExists('transactions');
+        Schema::dropIfExists('entity_identity_aliases');
+        Schema::dropIfExists('entity_identities');
         Schema::dropIfExists('business_profile_memberships');
         Schema::dropIfExists('workspace_memberships');
         Schema::dropIfExists('business_profiles');
@@ -253,6 +255,60 @@ class AgentToolEndpointTest extends TestCase
         $this->assertSame('Profile A Vendor', $response->json('transactions.0.vendor'));
     }
 
+    public function test_transaction_detail_returns_stable_entity_ids_when_identity_tables_exist(): void
+    {
+        [$company, $user] = $this->createCompanyUser();
+        [$profileA] = $this->createBusinessProfiles($company->id);
+        $this->createEntityIdentityTables();
+        $txnId = (string) Str::uuid();
+
+        DB::table('transactions')->insert([
+            'id' => $txnId,
+            'company_id' => $company->id,
+            'business_profile_id' => $profileA,
+            'date' => '2026-05-01',
+            'vendor_customer' => 'Northstar Consulting',
+            'amount' => '500.00',
+            'type' => 'expense',
+            'category' => 'Software',
+            'anomaly_flag' => 0,
+        ]);
+
+        $headers = [
+            'X-Brevix-User-Id' => $user->id,
+            'X-Brevix-Business-Profile-Id' => $profileA,
+        ];
+        $url = "/api/internal/agent-tools/company/{$company->id}/transaction-detail?ids[]={$txnId}";
+
+        $first = $this->withToken('test-tool-key')
+            ->withHeaders($headers)
+            ->getJson($url)
+            ->assertOk()
+            ->json('transactions.0');
+
+        $second = $this->withToken('test-tool-key')
+            ->withHeaders($headers)
+            ->getJson($url)
+            ->assertOk()
+            ->json('transactions.0');
+
+        foreach (['vendor_id', 'approved_by', 'document_id', 'bank_account_id'] as $field) {
+            $this->assertTrue(Str::isUuid($first[$field]), "{$field} should be a stable UUID");
+            $this->assertSame($first[$field], $second[$field], "{$field} should be stable across repeated reads");
+        }
+
+        $legacyVendorHash = md5($company->id.'|vendor|northstar consulting');
+        $this->assertNotSame($legacyVendorHash, $first['vendor_id']);
+        $this->assertDatabaseHas('entity_identity_aliases', [
+            'entity_identity_id' => $first['vendor_id'],
+            'company_id' => $company->id,
+            'business_profile_id' => $profileA,
+            'entity_type' => 'vendor',
+            'alias_type' => 'legacy_hash',
+            'normalized_alias' => $legacyVendorHash,
+        ]);
+    }
+
     // ── pending-recommendations ───────────────────────────────────────────────
 
     public function test_pending_recommendations_returns_401_without_agent_key(): void
@@ -403,5 +459,42 @@ class AgentToolEndpointTest extends TestCase
         ]);
 
         return [$profileA, $profileB];
+    }
+
+    private function createEntityIdentityTables(): void
+    {
+        Schema::create('entity_identities', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('company_id')->constrained('companies')->cascadeOnDelete();
+            $table->foreignUuid('business_profile_id')->nullable()->constrained('business_profiles')->nullOnDelete();
+            $table->string('scope_key', 80)->default('company');
+            $table->string('entity_type', 40);
+            $table->string('canonical_key', 512);
+            $table->string('display_name', 512)->nullable();
+            $table->string('legacy_identity_hash', 32)->nullable();
+            $table->json('metadata')->nullable();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['company_id', 'scope_key', 'entity_type', 'canonical_key'], 'entity_identities_scope_type_key_unique');
+        });
+
+        Schema::create('entity_identity_aliases', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('entity_identity_id')->constrained('entity_identities')->cascadeOnDelete();
+            $table->foreignUuid('company_id')->constrained('companies')->cascadeOnDelete();
+            $table->foreignUuid('business_profile_id')->nullable()->constrained('business_profiles')->nullOnDelete();
+            $table->string('scope_key', 80)->default('company');
+            $table->string('entity_type', 40);
+            $table->string('alias_type', 40);
+            $table->string('alias_value', 512);
+            $table->string('normalized_alias', 512);
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['company_id', 'scope_key', 'entity_type', 'alias_type', 'normalized_alias'], 'entity_aliases_lookup_unique');
+        });
     }
 }

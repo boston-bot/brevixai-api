@@ -16,6 +16,7 @@ use App\Services\Agents\BehavioralBaselineService;
 use App\Services\Agents\CaseRecommendationService;
 use App\Services\Agents\EntityRelationshipRiskScoringService;
 use App\Services\Agents\ReconciliationRiskScoringService;
+use App\Services\Agents\StableEntityIdentityService;
 use App\Services\Agents\VendorRiskScoringService;
 use App\Services\BusinessProfileContext;
 use App\Services\BusinessProfileContextService;
@@ -33,6 +34,7 @@ class AgentToolController extends Controller
     public function __construct(
         private readonly BusinessProfileContextService $businessProfileContext,
         private readonly SourceFindingMaterializationService $sourceFindingMaterialization,
+        private readonly StableEntityIdentityService $stableEntityIdentity,
     ) {}
 
     public function companyContext(Request $request, string $companyId): JsonResponse
@@ -489,15 +491,16 @@ class AgentToolController extends Controller
                 ->get()
                 ->map(function (Transaction $t) use ($context, $request): array {
                     $vendorName = $t->vendor_customer ?? '';
-                    $vendorId = $vendorName ? md5($context->companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+                    $transactionId = (string) $t->id;
+                    $vendorId = $this->stableEntityIdentity->vendorId($context->companyId, $vendorName, $context->businessProfileId);
                     return [
-                        'id' => (string) $t->id,
+                        'id' => $transactionId,
                         'company_id' => $context->companyId,
                         'company_user_id' => $request->header('X-Brevix-User-Id') ?? 'system',
                         'vendor_id' => $vendorId,
-                        'approved_by' => md5($context->companyId . '|approver|' . $t->id),
-                        'document_id' => md5($context->companyId . '|document|' . $t->id),
-                        'bank_account_id' => md5($context->companyId . '|bank_account|default'),
+                        'approved_by' => $this->stableEntityIdentity->approverId($context->companyId, $transactionId, businessProfileId: $context->businessProfileId),
+                        'document_id' => $this->stableEntityIdentity->documentId($context->companyId, $transactionId, businessProfileId: $context->businessProfileId),
+                        'bank_account_id' => $this->stableEntityIdentity->bankAccountId($context->companyId, businessProfileId: $context->businessProfileId),
                         'date' => $t->date,
                         'vendor' => $vendorName ?: null,
                         'amount' => (float) $t->amount,
@@ -640,7 +643,7 @@ class AgentToolController extends Controller
             ->orderByDesc('id')
             ->limit($limit)
             ->get()
-            ->map(fn (object $transaction): array => $this->summarizeTransaction((array) $transaction, $companyId, $request->header('X-Brevix-User-Id')))
+            ->map(fn (object $transaction): array => $this->summarizeTransaction((array) $transaction, $companyId, $request->header('X-Brevix-User-Id'), $businessProfileId))
             ->values()
             ->all();
 
@@ -654,19 +657,20 @@ class AgentToolController extends Controller
         ];
     }
 
-    private function summarizeTransaction(array $transaction, string $companyId, ?string $userId = null): array
+    private function summarizeTransaction(array $transaction, string $companyId, ?string $userId = null, ?string $businessProfileId = null): array
     {
         $vendorName = $transaction['vendor_customer'] ?? '';
-        $vendorId = $vendorName ? md5($companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+        $transactionId = (string) ($transaction['id'] ?? '');
+        $vendorId = $this->stableEntityIdentity->vendorId($companyId, $vendorName, $businessProfileId);
 
         return [
-            'id' => (string) ($transaction['id'] ?? ''),
+            'id' => $transactionId,
             'company_id' => $companyId,
             'company_user_id' => $userId ?? 'system',
             'vendor_id' => $vendorId,
-            'approved_by' => md5($companyId . '|approver|' . ($transaction['id'] ?? '')),
-            'document_id' => md5($companyId . '|document|' . ($transaction['id'] ?? '')),
-            'bank_account_id' => md5($companyId . '|bank_account|default'),
+            'approved_by' => $this->stableEntityIdentity->approverId($companyId, $transactionId, businessProfileId: $businessProfileId),
+            'document_id' => $this->stableEntityIdentity->documentId($companyId, $transactionId, businessProfileId: $businessProfileId),
+            'bank_account_id' => $this->stableEntityIdentity->bankAccountId($companyId, businessProfileId: $businessProfileId),
             'date' => $transaction['date'] ?? null,
             'vendor' => $vendorName ?: null,
             'amount' => (float) ($transaction['amount'] ?? 0),
