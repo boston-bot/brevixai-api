@@ -7,11 +7,13 @@ use App\Models\Company;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Agents\EntityRelationshipRiskScoringService;
+use App\Services\Agents\StableEntityIdentityService;
 
 class EntityGraphService
 {
     public function __construct(
         private EntityRelationshipRiskScoringService $scoringService,
+        private StableEntityIdentityService $stableEntityIdentity,
     ) {}
 
     public function getGraph(string $companyId): array
@@ -67,7 +69,7 @@ class EntityGraphService
         $vendorStats = $this->vendorStats($companyId);
         foreach ($vendorStats as $vendor) {
             $vendorName = (string) $vendor['vendor'];
-            $nodeId = $this->vendorNodeId($vendorName);
+            $nodeId = $this->vendorNodeId($companyId, $vendorName);
             $nodes[] = [
                 'id' => $nodeId,
                 'type' => 'vendor',
@@ -87,7 +89,7 @@ class EntityGraphService
 
         $edgeSeq = 0;
         foreach ($vendorStats as $vendor) {
-            $vendorId = $this->vendorNodeId((string) $vendor['vendor']);
+            $vendorId = $this->vendorNodeId($companyId, (string) $vendor['vendor']);
             $edgeSeq++;
             $edges[] = [
                 'id' => 'edge_'.$edgeSeq,
@@ -181,9 +183,9 @@ class EntityGraphService
         ];
     }
 
-    private function vendorNodeId(string $vendorName): string
+    private function vendorNodeId(string $companyId, string $vendorName): string
     {
-        return 'v_'.substr(hash('sha256', $vendorName), 0, 16);
+        return (string) $this->stableEntityIdentity->vendorId($companyId, $vendorName);
     }
 
     /**

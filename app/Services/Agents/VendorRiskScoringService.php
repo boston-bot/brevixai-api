@@ -11,6 +11,13 @@ use Illuminate\Support\Facades\Schema;
 
 class VendorRiskScoringService
 {
+    private ?StableEntityIdentityService $stableEntityIdentity = null;
+
+    public function __construct(?StableEntityIdentityService $stableEntityIdentity = null)
+    {
+        $this->stableEntityIdentity = $stableEntityIdentity;
+    }
+
     /**
      * Map of rule keys to their designated deterministic weights.
      */
@@ -289,7 +296,7 @@ class VendorRiskScoringService
 
         $finalScore = min(100, $totalScore);
 
-        $vendorId = $vendorName ? md5($companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+        $vendorId = $this->stableEntityIdentity()->vendorId($companyId, $vendorName, $businessProfileId);
 
         return [
             'vendor_id' => $vendorId,
@@ -345,7 +352,7 @@ class VendorRiskScoringService
      */
     private function emptyVendorResponse(string $companyId, string $vendorName, ?string $businessProfileId = null): array
     {
-        $vendorId = $vendorName ? md5($companyId . '|vendor|' . strtolower(trim($vendorName))) : null;
+        $vendorId = $this->stableEntityIdentity()->vendorId($companyId, $vendorName, $businessProfileId);
 
         return [
             'vendor_id' => $vendorId,
@@ -416,5 +423,10 @@ class VendorRiskScoringService
                 $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
                 fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
             );
+    }
+
+    private function stableEntityIdentity(): StableEntityIdentityService
+    {
+        return $this->stableEntityIdentity ??= app(StableEntityIdentityService::class);
     }
 }
