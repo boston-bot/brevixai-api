@@ -11,6 +11,13 @@ use Illuminate\Support\Facades\Schema;
 
 class EntityRelationshipRiskScoringService
 {
+    private ?StableEntityIdentityService $stableEntityIdentity = null;
+
+    public function __construct(?StableEntityIdentityService $stableEntityIdentity = null)
+    {
+        $this->stableEntityIdentity = $stableEntityIdentity;
+    }
+
     /**
      * Calculate entity relationship risk score and return structured explainable details.
      */
@@ -71,7 +78,7 @@ class EntityRelationshipRiskScoringService
                         'type' => 'employee_vendor_relationship',
                         'relationship_type' => 'employee_vendor_overlap',
                         'employee_id' => $u->id,
-                        'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($v))),
+                        'vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, $v, $businessProfileId),
                         'entities' => [$fullName, $v],
                         'description' => "Employee name or email matched vendor name '{$v}'.",
                     ];
@@ -118,8 +125,8 @@ class EntityRelationshipRiskScoringService
                 $relatedEntities[] = [
                     'type' => 'shared_banking',
                     'relationship_type' => 'vendor_uses_bank_account',
-                    'bank_account_id' => md5($companyId . '|bank_account|' . $a->id),
-                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[0] ?? ''))),
+                    'bank_account_id' => $this->stableEntityIdentity()->bankAccountId($companyId, (string) $a->id, businessProfileId: $businessProfileId),
+                    'vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($related[0] ?? ''), $businessProfileId),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -154,8 +161,8 @@ class EntityRelationshipRiskScoringService
                 $relatedEntities[] = [
                     'type' => 'shared_address',
                     'relationship_type' => 'employee_shares_address_with_vendor',
-                    'employee_id' => md5($companyId . '|employee|' . strtolower(trim($related[0] ?? ''))),
-                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[1] ?? ''))),
+                    'employee_id' => $this->stableEntityIdentity()->employeeId($companyId, (string) ($related[0] ?? ''), businessProfileId: $businessProfileId),
+                    'vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($related[1] ?? ''), $businessProfileId),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -192,7 +199,7 @@ class EntityRelationshipRiskScoringService
                 $relatedEntities[] = [
                     'type' => 'shared_contact',
                     'relationship_type' => 'shared_contact',
-                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[0] ?? ''))),
+                    'vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($related[0] ?? ''), $businessProfileId),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -231,8 +238,8 @@ class EntityRelationshipRiskScoringService
                 $relatedEntities[] = [
                     'type' => 'duplicate_vendor_identity',
                     'relationship_type' => 'vendor_related_to_vendor',
-                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($cluster[0] ?? ''))),
-                    'related_vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($cluster[1] ?? ''))),
+                    'vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($cluster[0] ?? ''), $businessProfileId),
+                    'related_vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($cluster[1] ?? ''), $businessProfileId),
                     'entities' => $cluster,
                     'description' => 'Vendors identified as part of a single identity cluster due to close spelling similarity.',
                 ];
@@ -278,8 +285,8 @@ class EntityRelationshipRiskScoringService
                 $relatedEntities[] = [
                     'type' => 'vendor_vendor_relationship',
                     'relationship_type' => 'vendor_vendor_payment',
-                    'vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[0] ?? ''))),
-                    'related_vendor_id' => md5($companyId . '|vendor|' . strtolower(trim($related[1] ?? ''))),
+                    'vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($related[0] ?? ''), $businessProfileId),
+                    'related_vendor_id' => $this->stableEntityIdentity()->vendorId($companyId, (string) ($related[1] ?? ''), $businessProfileId),
                     'entities' => $related,
                     'description' => $a->detail ?? $a->title,
                 ];
@@ -391,5 +398,10 @@ class EntityRelationshipRiskScoringService
                 $businessProfileId && Schema::hasColumn('alerts', 'business_profile_id'),
                 fn (Builder $query) => $query->where('business_profile_id', $businessProfileId),
             );
+    }
+
+    private function stableEntityIdentity(): StableEntityIdentityService
+    {
+        return $this->stableEntityIdentity ??= app(StableEntityIdentityService::class);
     }
 }
