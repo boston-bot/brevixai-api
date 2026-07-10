@@ -54,6 +54,8 @@ enum RexProcess: string
                 'aggregate_risk_summary',
                 'alert_recommendations',
                 'case_recommendations',
+                'fraud_playbook_search',
+                'fraud_playbook_feedback',
             ],
             self::RecommendationReview => [
                 'company_context',

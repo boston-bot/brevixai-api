@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          ini-values: memory_limit=2048M
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      # Tests run against the sqlite :memory: connection from phpunit.xml — no DB service needed.
+      - name: Run tests
+        run: php -d memory_limit=2048M artisan test

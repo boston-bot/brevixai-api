@@ -24,6 +24,8 @@ class AgentActionExecutorTest extends TestCase
     {
         parent::setUp();
 
+        Schema::dropIfExists('retrieval_feedback');
+        Schema::dropIfExists('investigation_playbooks');
         Schema::dropIfExists('alerts');
         Schema::dropIfExists('investigations');
         Schema::dropIfExists('agent_action_approvals');
@@ -122,6 +124,26 @@ class AgentActionExecutorTest extends TestCase
             $table->json('metadata')->nullable();
             $table->timestamps();
         });
+
+        // Mirrors 2026_06_14_183535_create_investigation_playbooks_tables.php
+        // (retrieval_feedback.user_id is a uuid FK to users).
+        Schema::create('investigation_playbooks', function (Blueprint $table): void {
+            $table->id();
+            $table->string('title');
+            $table->string('category');
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
+
+        Schema::create('retrieval_feedback', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('playbook_id')->constrained('investigation_playbooks')->cascadeOnDelete();
+            $table->string('query_text');
+            $table->integer('relevance_score');
+            $table->text('user_feedback')->nullable();
+            $table->foreignUuid('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+        });
     }
 
     public function test_supported_action_types_includes_create_alert(): void
@@ -211,6 +233,144 @@ class AgentActionExecutorTest extends TestCase
             'id'         => $result->resourceId,
             'company_id' => $company->id,
         ]);
+    }
+
+    public function test_create_investigation_persists_playbook_provenance_capped_at_three(): void
+    {
+        $playbookId = $this->createPlaybook('Duplicate invoice review');
+
+        [$company, $user, $approval] = $this->fixtures(actionType: 'create_investigation', extraPayload: [
+            'title' => 'Playbook-Informed Investigation',
+            'retrieval_query' => 'duplicate vendor invoices split payments',
+            'playbook_refs' => [
+                $this->playbookRef((string) $playbookId, 'Duplicate invoice review'),
+                $this->playbookRef('9001', 'Ghost employee review'),
+                $this->playbookRef('9002', 'Shell vendor review'),
+                $this->playbookRef('9003', 'Fourth ref beyond the cap'),
+            ],
+        ]);
+
+        $result = (new AgentActionExecutorService())->execute($approval, $user);
+
+        $investigation = \App\Models\Investigation::find($result->resourceId);
+        $metadata = $investigation->metadata;
+
+        $this->assertSame('duplicate vendor invoices split payments', $metadata['retrieval_query']);
+        $this->assertCount(3, $metadata['playbook_refs']);
+        $this->assertSame((string) $playbookId, $metadata['playbook_refs'][0]['playbook_id']);
+        $this->assertSame('Shell vendor review', $metadata['playbook_refs'][2]['title']);
+    }
+
+    public function test_create_investigation_records_outcome_feedback_only_for_existing_playbooks(): void
+    {
+        $existingId = $this->createPlaybook('Duplicate invoice review');
+        $otherId = $this->createPlaybook('Ghost employee review');
+
+        [$company, $user, $approval] = $this->fixtures(actionType: 'create_investigation', extraPayload: [
+            'title' => 'Playbook-Informed Investigation',
+            'retrieval_query' => 'duplicate vendor invoices',
+            'playbook_refs' => [
+                $this->playbookRef((string) $existingId, 'Duplicate invoice review'),
+                $this->playbookRef((string) $otherId, 'Ghost employee review'),
+                $this->playbookRef('424242', 'Playbook that does not exist'),
+            ],
+        ]);
+
+        (new AgentActionExecutorService())->execute($approval, $user);
+
+        $this->assertSame(2, \App\Models\Fraud\RetrievalFeedback::count());
+
+        foreach ([$existingId, $otherId] as $playbookId) {
+            $this->assertDatabaseHas('retrieval_feedback', [
+                'playbook_id' => $playbookId,
+                'query_text' => 'duplicate vendor invoices',
+                'relevance_score' => 5,
+                'user_feedback' => 'outcome:investigation_created',
+                'user_id' => $user->id,
+            ]);
+        }
+
+        $this->assertDatabaseMissing('retrieval_feedback', ['playbook_id' => 424242]);
+    }
+
+    public function test_create_investigation_outcome_feedback_falls_back_to_ref_title_for_query_text(): void
+    {
+        $playbookId = $this->createPlaybook('Duplicate invoice review');
+
+        [$company, $user, $approval] = $this->fixtures(actionType: 'create_investigation', extraPayload: [
+            'title' => 'Playbook-Informed Investigation',
+            'playbook_refs' => [
+                $this->playbookRef((string) $playbookId, 'Duplicate invoice review'),
+            ],
+        ]);
+
+        (new AgentActionExecutorService())->execute($approval, $user);
+
+        $this->assertDatabaseHas('retrieval_feedback', [
+            'playbook_id' => $playbookId,
+            'query_text' => 'Duplicate invoice review',
+            'relevance_score' => 5,
+            'user_feedback' => 'outcome:investigation_created',
+            'user_id' => $user->id,
+        ]);
+    }
+
+    public function test_create_investigation_without_playbook_refs_has_empty_provenance_and_no_feedback(): void
+    {
+        [$company, $user, $approval] = $this->fixtures(actionType: 'create_investigation', extraPayload: [
+            'title' => 'Plain Investigation',
+        ]);
+
+        $result = (new AgentActionExecutorService())->execute($approval, $user);
+
+        $investigation = \App\Models\Investigation::find($result->resourceId);
+        $this->assertSame([], $investigation->metadata['playbook_refs']);
+        $this->assertNull($investigation->metadata['retrieval_query']);
+        $this->assertSame(0, \App\Models\Fraud\RetrievalFeedback::count());
+    }
+
+    public function test_create_investigation_with_only_nonexistent_playbook_refs_still_succeeds(): void
+    {
+        [$company, $user, $approval] = $this->fixtures(actionType: 'create_investigation', extraPayload: [
+            'title' => 'Investigation With Stale Refs',
+            'retrieval_query' => 'stale playbook reference',
+            'playbook_refs' => [
+                $this->playbookRef('99999', 'Playbook removed from corpus'),
+            ],
+        ]);
+
+        $result = (new AgentActionExecutorService())->execute($approval, $user);
+
+        $this->assertSame('investigation', $result->resourceType);
+        $this->assertDatabaseHas('investigations', ['id' => $result->resourceId]);
+        $this->assertSame(0, \App\Models\Fraud\RetrievalFeedback::count());
+
+        $fresh = AgentActionApproval::find($approval->id);
+        $this->assertSame('approved', $fresh->status);
+    }
+
+    private function createPlaybook(string $title): int
+    {
+        return (int) \Illuminate\Support\Facades\DB::table('investigation_playbooks')->insertGetId([
+            'title' => $title,
+            'category' => 'expense',
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /** @return array<string, mixed> Contract shape emitted by the Python agent service. */
+    private function playbookRef(string $playbookId, string $title): array
+    {
+        return [
+            'playbook_id' => $playbookId,
+            'title' => $title,
+            'confidence' => 'high',
+            'relevance_score' => 0.91,
+            'corpus_version' => 'fraud_playbooks:v2',
+            'matched_fields' => ['title', 'red_flags'],
+        ];
     }
 
     /** @return array{0: Company, 1: User, 2: AgentActionApproval} */

@@ -6,6 +6,8 @@ use App\Models\AgentActionApproval;
 use App\Models\Alert;
 use App\Models\AuditCase;
 use App\Models\Company;
+use App\Models\Fraud\InvestigationPlaybook;
+use App\Models\Fraud\RetrievalFeedback;
 use App\Models\Investigation;
 use App\Models\Transaction;
 use App\Models\User;
@@ -72,6 +74,8 @@ class AgentActionExecutorService
                         'agent_run_id' => (string) $approval->agent_run_id,
                         'reason_codes' => is_array($payload['reason_codes'] ?? null) ? $payload['reason_codes'] : [],
                         'evidence_refs' => is_array($payload['evidence_refs'] ?? null) ? $payload['evidence_refs'] : [],
+                        'playbook_refs' => is_array($payload['playbook_refs'] ?? null) ? array_slice($payload['playbook_refs'], 0, 3) : [],
+                        'retrieval_query' => is_string($payload['retrieval_query'] ?? null) ? $payload['retrieval_query'] : null,
                     ],
                 ];
                 if ($approval->business_profile_id && Schema::hasColumn('investigations', 'business_profile_id')) {
@@ -106,10 +110,60 @@ class AgentActionExecutorService
 
             $this->logExecution($approval, $approver, $result, 'success');
 
+            // Record retrieval outcome labels best-effort — never fail the primary operation
+            try {
+                $this->recordPlaybookOutcomeFeedback($payload, $approver);
+            } catch (Throwable) {
+                // Outcome-label failure is non-fatal
+            }
+
             return $result;
         } catch (Throwable $e) {
             $this->logFailure($approval, $e);
             throw $e;
+        }
+    }
+
+    /**
+     * RAG outcome labeling: an approved investigation that cites a playbook is the
+     * strongest relevance signal available, so record one retrieval_feedback row per
+     * cited playbook. FraudPlaybookRetriever aggregates these into ranking boosts.
+     * Best-effort by contract — callers wrap this and must never fail on it.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function recordPlaybookOutcomeFeedback(array $payload, User $approver): void
+    {
+        $refs = is_array($payload['playbook_refs'] ?? null) ? array_slice($payload['playbook_refs'], 0, 3) : [];
+        if ($refs === [] || ! Schema::hasTable('retrieval_feedback') || ! Schema::hasTable('investigation_playbooks')) {
+            return;
+        }
+
+        $retrievalQuery = is_string($payload['retrieval_query'] ?? null) ? $payload['retrieval_query'] : null;
+
+        foreach ($refs as $ref) {
+            if (! is_array($ref) || ! is_numeric($ref['playbook_id'] ?? null)) {
+                continue;
+            }
+
+            $playbookId = (int) $ref['playbook_id'];
+            if (! InvestigationPlaybook::whereKey($playbookId)->exists()) {
+                continue;
+            }
+
+            $queryText = $retrievalQuery
+                ?? (is_string($ref['title'] ?? null) ? $ref['title'] : null);
+            if ($queryText === null || trim($queryText) === '') {
+                continue;
+            }
+
+            RetrievalFeedback::create([
+                'playbook_id' => $playbookId,
+                'query_text' => $queryText,
+                'relevance_score' => 5,
+                'user_feedback' => 'outcome:investigation_created',
+                'user_id' => $approver->id,
+            ]);
         }
     }
 

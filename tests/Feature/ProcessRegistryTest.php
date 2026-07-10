@@ -31,13 +31,14 @@ class ProcessRegistryTest extends TestCase
         $this->assertContains('create_alert', $p->approvalTypes());
     }
 
-    public function test_risk_review_advertises_all_eight_tools(): void
+    public function test_risk_review_advertises_all_ten_tools(): void
     {
         $tools = RexProcess::RiskReview->tools();
-        $this->assertCount(8, $tools);
+        $this->assertCount(10, $tools);
         foreach (['company_context', 'risk_summary', 'vendor_risk', 'reconciliation_risk',
                   'entity_relationship_risk', 'aggregate_risk_summary',
-                  'alert_recommendations', 'case_recommendations'] as $key) {
+                  'alert_recommendations', 'case_recommendations',
+                  'fraud_playbook_search', 'fraud_playbook_feedback'] as $key) {
             $this->assertContains($key, $tools);
         }
     }
