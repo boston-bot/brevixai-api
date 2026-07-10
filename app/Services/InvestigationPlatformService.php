@@ -611,6 +611,7 @@ class InvestigationPlatformService
             'package_count' => (int) ($investigation->case_packages_count ?? 0),
             'alert_count' => 0,
             'recommendation_count' => 0,
+            'metadata' => $this->sanitizeMetadata($investigation->metadata ?? []),
         ];
     }
 

@@ -64,7 +64,7 @@ return new class extends Migration
             $table->string('query_text');
             $table->integer('relevance_score'); // e.g., 1 to 5, or 0/1
             $table->text('user_feedback')->nullable();
-            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete(); // Assuming users table exists
+            $table->foreignUuid('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
         });
     }

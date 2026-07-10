@@ -301,6 +301,8 @@ class AgentChatControllerTest extends TestCase
 
             $pendingTool = $tools['pending_recommendations'] ?? null;
             $detailTool = $tools['transaction_detail'] ?? null;
+            $playbookSearchTool = $tools['fraud_playbook_search'] ?? null;
+            $playbookFeedbackTool = $tools['fraud_playbook_feedback'] ?? null;
 
             if (
                 ! is_array($aggregateTool)
@@ -311,11 +313,19 @@ class AgentChatControllerTest extends TestCase
                 || ! is_array($caseTool)
                 || ! is_array($pendingTool)
                 || ! is_array($detailTool)
+                || ! is_array($playbookSearchTool)
+                || ! is_array($playbookFeedbackTool)
             ) {
                 return false;
             }
 
-            return count($tools) === 10
+            return count($tools) === 12
+                && $playbookSearchTool['method'] === 'GET'
+                && $playbookSearchTool['path'] === '/api/internal/agent-tools/fraud/playbooks/search'
+                && $playbookSearchTool['optional'] === true
+                && $playbookFeedbackTool['method'] === 'POST'
+                && $playbookFeedbackTool['path'] === '/api/internal/agent-tools/fraud/playbooks/feedback'
+                && $playbookFeedbackTool['optional'] === true
                 && $contextTool['method'] === 'GET'
                 && $contextTool['path'] === "/api/internal/agent-tools/companies/{$company->id}/context"
                 && $contextTool['optional'] === false
